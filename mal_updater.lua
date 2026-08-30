@@ -79,6 +79,56 @@ local function latestRelease()
     }
 end
 
+local function safeArchivePath(path)
+    path = tostring(path or "")
+    if path == "" or path:sub(1, 1) == "/" or path:find("\\", 1, true) then return false end
+    local first
+    for part in path:gmatch("[^/]+") do
+        first = first or part
+        if part == ".." then return false end
+    end
+    return first == "myanimelist.koplugin"
+end
+
+-- KOReader removed Device:unpackArchive in July 2026. Prefer the core
+-- libarchive reader and retain the old helper only for older releases.
+local function extractArchive(zip_path, parent)
+    local has_archiver, Archiver = pcall(require, "ffi/archiver")
+    if has_archiver and type(Archiver) == "table" and Archiver.Reader then
+        local arc = Archiver.Reader:new()
+        if not arc:open(zip_path) then
+            local open_err = arc.err
+            arc:close()
+            return nil, tostring(open_err or "could_not_open_archive")
+        end
+        local extracted_any = false
+        local extract_err
+        for entry in arc:iterate() do
+            if not safeArchivePath(entry.path) then
+                extract_err = "unsafe_archive_path"
+                break
+            end
+            if not arc:extractToPath(entry.path, parent .. "/" .. entry.path) then
+                extract_err = tostring(arc.err or "archive_extract_failed")
+                break
+            end
+            extracted_any = true
+        end
+        if not extract_err and arc.err then extract_err = tostring(arc.err) end
+        arc:close()
+        if extract_err then return nil, extract_err end
+        if not extracted_any then return nil, "empty_archive" end
+        return true
+    end
+
+    if type(Device.unpackArchive) == "function" then
+        local ok, err = Device:unpackArchive(zip_path, parent, false)
+        if ok then return true end
+        return nil, tostring(err or "archive_extract_failed")
+    end
+    return nil, "archive_extractor_unavailable"
+end
+
 local function installRelease(release)
     local plugin_dir = DataStorage:getDataDir() .. "/plugins/myanimelist.koplugin"
     local parent = plugin_dir:match("^(.*)/[^/]+$")
@@ -95,7 +145,7 @@ local function installRelease(release)
         return { success = false, stage = "download", err = err }
     end
 
-    local extracted, extract_err = Device:unpackArchive(zip_path, parent, false)
+    local extracted, extract_err = extractArchive(zip_path, parent)
     pcall(os.remove, zip_path)
     if not extracted then
         return { success = false, stage = "extract", err = extract_err or "archive_extract_failed" }
@@ -111,15 +161,35 @@ local function installRelease(release)
 end
 
 local function runTask(operation, label, callback, quiet)
+    local function protectedOperation()
+        local ok, result = xpcall(operation, debug.traceback)
+        if ok then return result end
+        return {
+            success = false,
+            error = tostring(result),
+            stage = "internal",
+            err = tostring(result),
+        }
+    end
+
     local function run()
         local trap_widget = label
         if quiet then trap_widget = false end
         local completed, result = Trapper:dismissableRunInSubprocess(
-            operation,
+            protectedOperation,
             trap_widget,
             false
         )
-        if not completed then result = { error = "operation_cancelled" } end
+        if not completed then
+            result = { error = "operation_cancelled", stage = "cancelled", err = "operation_cancelled" }
+        elseif result == nil then
+            result = {
+                success = false,
+                error = "subprocess_returned_no_result",
+                stage = "subprocess",
+                err = "subprocess_returned_no_result",
+            }
+        end
         -- Leave the Trapper coroutine before opening dialogs or starting another task.
         UIManager:scheduleIn(0.1, function() callback(result) end)
     end
@@ -197,6 +267,7 @@ function Updater.check(plugin, interactive)
 end
 
 Updater._test = {
+    extractArchive = extractArchive,
     isNewer = isNewer,
     runTask = runTask,
 }
