@@ -1,10 +1,10 @@
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
+local Device = require("device")
 local NetworkMgr = require("ui/network/manager")
 local Notification = require("ui/widget/notification")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
-local lfs = require("libs/libkoreader-lfs")
 local ltn12 = require("ltn12")
 local rapidjson = require("rapidjson")
 local socket = require("socket")
@@ -17,10 +17,6 @@ local API_URL = "https://api.github.com/repos/komadorirobin/myanimelist.koplugin
 local RELEASES_URL = "https://github.com/komadorirobin/myanimelist.koplugin/releases"
 local CHECK_INTERVAL = 24 * 60 * 60
 local checking = false
-
-local function sq(value)
-    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
 
 local function versionParts(value)
     local parts = {}
@@ -83,79 +79,56 @@ local function latestRelease()
     }
 end
 
-local function extract(zip_path, destination)
-    local ok_archiver, Archiver = pcall(require, "ffi/archiver")
-    if not ok_archiver or not Archiver or not Archiver.Reader then
-        return nil, "archive_extractor_unavailable"
-    end
-    local archive = Archiver.Reader:new()
-    if not archive:open(zip_path) then
-        local err = archive.err
-        archive:close()
-        return nil, tostring(err or "archive_open_failed")
-    end
-    local extract_err
-    for entry in archive:iterate() do
-        local relative = entry.path and entry.path:match("^[^/]+/(.+)$")
-        if relative and relative ~= "" and not relative:find("../", 1, true)
-                and relative:sub(1, 1) ~= "/" then
-            if not archive:extractToPath(entry.path, destination .. "/" .. relative) then
-                extract_err = archive.err or "archive_extract_failed"
-                break
-            end
-        end
-    end
-    archive:close()
-    if extract_err then return nil, tostring(extract_err) end
-    return true
-end
-
 local function installRelease(release)
     local plugin_dir = DataStorage:getDataDir() .. "/plugins/myanimelist.koplugin"
     local parent = plugin_dir:match("^(.*)/[^/]+$")
     local zip_path = parent .. "/myanimelist-update.zip"
-    local staging = plugin_dir .. ".update"
-    local backup = plugin_dir .. ".bak"
-    os.execute("rm -rf " .. sq(staging) .. " " .. sq(backup))
-    local file = io.open(zip_path, "wb")
-    if not file then return nil, "could_not_create_download" end
-    local ok, err = request(release.zip_url, ltn12.sink.file(file))
-    if not ok then pcall(os.remove, zip_path); return nil, err end
-    if not lfs.mkdir(staging) and lfs.attributes(staging, "mode") ~= "directory" then
-        pcall(os.remove, zip_path)
-        return nil, "could_not_create_staging"
-    end
-    local extracted, extract_err = extract(zip_path, staging)
     pcall(os.remove, zip_path)
-    if not extracted or lfs.attributes(staging .. "/main.lua", "mode") ~= "file" then
-        os.execute("rm -rf " .. sq(staging))
-        return nil, extract_err or "invalid_plugin_archive"
+    local file = io.open(zip_path, "wb")
+    if not file then
+        return { success = false, stage = "download", err = "could_not_create_download" }
     end
-    if not os.rename(plugin_dir, backup) then
-        os.execute("rm -rf " .. sq(staging))
-        return nil, "could_not_backup_plugin"
+    local ok, err = request(release.zip_url, ltn12.sink.file(file))
+    pcall(function() file:close() end)
+    if not ok then
+        pcall(os.remove, zip_path)
+        return { success = false, stage = "download", err = err }
     end
-    if not os.rename(staging, plugin_dir) then
-        os.rename(backup, plugin_dir)
-        os.execute("rm -rf " .. sq(staging))
-        return nil, "could_not_install_plugin"
+
+    local extracted, extract_err = Device:unpackArchive(zip_path, parent, false)
+    pcall(os.remove, zip_path)
+    if not extracted then
+        return { success = false, stage = "extract", err = extract_err or "archive_extract_failed" }
     end
-    os.execute("rm -rf " .. sq(backup))
-    return true
+
+    local ok_meta, meta = pcall(dofile, plugin_dir .. "/_meta.lua")
+    local main_file = io.open(plugin_dir .. "/main.lua", "rb")
+    if main_file then main_file:close() end
+    if not main_file or not ok_meta or not meta or tostring(meta.version) ~= tostring(release.version) then
+        return { success = false, stage = "verify", err = "installed_version_mismatch" }
+    end
+    return { success = true }
 end
 
-local function runWrapped(operation, label, callback, quiet)
+local function runTask(operation, label, callback, quiet)
     local function run()
-        local completed, encoded = Trapper:dismissableRunInSubprocess(function()
-            local result, err = operation()
-            return rapidjson.encode({ result = result, error = err })
-        end, quiet and {} or label, quiet == true)
-        if not completed then return end
-        local ok, response = pcall(rapidjson.decode, encoded or "")
-        if not ok then callback(nil, "invalid_result") else callback(response.result, response.error) end
+        local trap_widget = label
+        if quiet then trap_widget = false end
+        local completed, result = Trapper:dismissableRunInSubprocess(
+            operation,
+            trap_widget,
+            false
+        )
+        if not completed then result = { error = "operation_cancelled" } end
+        -- Leave the Trapper coroutine before opening dialogs or starting another task.
+        UIManager:scheduleIn(0.1, function() callback(result) end)
     end
-    if Trapper:isWrapped() then return run() end
-    return Trapper:wrap(run)
+
+    if Trapper:isWrapped() then
+        UIManager:scheduleIn(0.1, function() Trapper:wrap(run) end)
+    else
+        Trapper:wrap(run)
+    end
 end
 
 function Updater.check(plugin, interactive)
@@ -165,12 +138,18 @@ function Updater.check(plugin, interactive)
     if not interactive and not NetworkMgr:isConnected() then return end
     checking = true
     NetworkMgr:runWhenOnline(function()
-        runWrapped(latestRelease, _("Checking for MyAnimeList plugin updates..."), function(release, err)
+        runTask(function()
+            local release, err = latestRelease()
+            return release or { error = err }
+        end, _("Checking for MyAnimeList plugin updates..."), function(release)
             checking = false
             plugin.settings.update_last_check_at = os.time()
             plugin:saveSettings()
-            if not release then
-                if interactive then plugin:showInfo(_("Could not check for plugin updates: ") .. tostring(err)) end
+            if not release or release.error then
+                if interactive then
+                    plugin:showInfo(_("Could not check for plugin updates: ")
+                        .. tostring(release and release.error or "unknown_error"))
+                end
                 return
             end
             local current = installedVersion()
@@ -183,18 +162,27 @@ function Updater.check(plugin, interactive)
                     text = string.format(_("MyAnimeList Manga Sync %s is available. Install it now?"), release.version),
                     ok_text = _("Update"),
                     ok_callback = function()
-                        runWrapped(function() return installRelease(release) end,
-                            _("Updating MyAnimeList plugin..."), function(installed, install_err)
-                                if not installed then
-                                    plugin:showInfo(_("Plugin update failed: ") .. tostring(install_err))
-                                    return
+                        UIManager:scheduleIn(0.1, function()
+                            runTask(
+                                function() return installRelease(release) end,
+                                _("Updating MyAnimeList plugin..."),
+                                function(result)
+                                    if not result or not result.success then
+                                        local stage = result and result.stage or "unknown"
+                                        local install_err = result and result.err or "unknown_error"
+                                        plugin:showInfo(string.format(
+                                            _("Plugin update failed during %s: %s"),
+                                            tostring(stage), tostring(install_err)))
+                                        return
+                                    end
+                                    UIManager:show(ConfirmBox:new{
+                                        text = _("Plugin updated. Restart KOReader now?"),
+                                        ok_text = _("Restart"),
+                                        ok_callback = function() UIManager:restartKOReader() end,
+                                    })
                                 end
-                                UIManager:show(ConfirmBox:new{
-                                    text = _("Plugin updated. Restart KOReader now?"),
-                                    ok_text = _("Restart"),
-                                    ok_callback = function() UIManager:restartKOReader() end,
-                                })
-                            end)
+                            )
+                        end)
                     end,
                 })
             end
@@ -208,7 +196,10 @@ function Updater.check(plugin, interactive)
     end)
 end
 
-Updater._test = { isNewer = isNewer }
+Updater._test = {
+    isNewer = isNewer,
+    runTask = runTask,
+}
 Updater.RELEASES_URL = RELEASES_URL
 
 return Updater
