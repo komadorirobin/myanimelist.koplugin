@@ -26,6 +26,8 @@ the corresponding manga entry on MyAnimeList.
   EPUB series names differ. The scan can also be run manually per linked series.
 - KOReader's regular status controls, SimpleUI status controls and Bookshelf's
   own edit dialog are supported.
+- Automatic status updates honor the explicitly linked Bookshelf folder even
+  when an EPUB contains a different or localized series name.
 - A linked series can be marked as an omnibus edition. Its local volume number
   is multiplied by the configured number of original volumes and capped at
   MAL's official total. A 3-in-1 volume 4 therefore updates MAL to volume 12.

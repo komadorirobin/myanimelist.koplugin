@@ -15,6 +15,15 @@ eq(Core.isMangaPath("/sdcard/ePubs/Manga/Attack on Titan", "/storage/emulated/0/
 eq(Core.isMangaPath("Manga/Attack on Titan/01.epub", "/storage/emulated/0/ePubs/Manga"), true,
     "relative Bookshelf paths must be recognized")
 eq(Core.isMangaPath("/storage/emulated/0/ePubs/Fiktion/Book.epub", "/storage/emulated/0/ePubs/Manga"), false)
+eq(Core.pathInside("/sdcard/ePubs/Manga/Series/02.epub",
+    "/storage/emulated/0/ePubs/Manga/Series"), true,
+    "linked folders must match Android storage aliases")
+local folder_mapping = { mal_id = 42, local_folder = "/storage/emulated/0/ePubs/Manga/Localized Series" }
+local found_mapping, found_key = Core.findMappingForFile({
+    ["localized series"] = folder_mapping,
+}, "different embedded metadata", "/sdcard/ePubs/Manga/Localized Series/02.epub")
+eq(found_mapping, folder_mapping, "live sync must fall back to the explicitly linked folder")
+eq(found_key, "localized series")
 eq(Core.cleanSeriesName("Attack on Titan / #31", 31), "Attack on Titan")
 eq(Core.volumeFromText("Attack on Titan, Vol. 27"), 27)
 eq(Core.volumeFromText("Manga_Name-003"), 3)

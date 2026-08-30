@@ -41,8 +41,7 @@ local function eachDirectory(path, callback)
 end
 
 local function isInside(path, root)
-    path, root = normalizePath(path), normalizePath(root)
-    return path == root or path:sub(1, #root + 1) == root .. "/"
+    return Core.pathInside(path, root)
 end
 
 local function isBookFile(path)

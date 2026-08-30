@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.8"
+local PLUGIN_VERSION = "1.4.9"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -249,7 +249,8 @@ function MyAnimeList:onLocalStatusChanged(file, known_status)
 
     local series = self:_resolveSeries(file)
     if not series then return end
-    local mapping = self.settings.mappings[series.key]
+    local mapping = Core.findMappingForFile(
+        self.settings.mappings, series.key, file)
     if not mapping then
         local pending = self.settings.pending_links[series.key] or {
             name = series.name,
@@ -264,6 +265,9 @@ function MyAnimeList:onLocalStatusChanged(file, known_status)
         return
     end
 
+    -- A previous event may have created a pending entry under an alternate
+    -- embedded series name before folder-based matching was available.
+    self.settings.pending_links[series.key] = nil
     self:_enqueue(mapping, series.volume)
     if self.settings.auto_sync then self:_scheduleSync() end
 end

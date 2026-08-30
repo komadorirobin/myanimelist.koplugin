@@ -5,7 +5,35 @@ local function trim(value)
 end
 
 local function normalizedPath(value)
-    return tostring(value or ""):gsub("\\", "/"):lower():gsub("/+", "/"):gsub("/+$", "")
+    local path = tostring(value or ""):gsub("\\", "/"):lower():gsub("/+", "/"):gsub("/+$", "")
+    path = path:gsub("^/mnt/sdcard", "/storage/emulated/0")
+    path = path:gsub("^/sdcard", "/storage/emulated/0")
+    return path
+end
+
+function Core.pathInside(path, root)
+    local normalized = normalizedPath(path)
+    local normalized_root = normalizedPath(root)
+    return normalized ~= "" and normalized_root ~= ""
+        and (normalized == normalized_root
+            or normalized:sub(1, #normalized_root + 1) == normalized_root .. "/")
+end
+
+function Core.findMappingForFile(mappings, series_key, file)
+    mappings = type(mappings) == "table" and mappings or {}
+    if mappings[series_key] then return mappings[series_key], series_key end
+
+    local best_mapping, best_key, best_length
+    for mapping_key, mapping in pairs(mappings) do
+        local folder = type(mapping) == "table" and mapping.local_folder or nil
+        if Core.pathInside(file, folder) then
+            local length = #normalizedPath(folder)
+            if not best_length or length > best_length then
+                best_mapping, best_key, best_length = mapping, mapping_key, length
+            end
+        end
+    end
+    return best_mapping, best_key
 end
 
 -- Android may expose the same storage through /storage/emulated/0, /sdcard,
