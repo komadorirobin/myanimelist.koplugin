@@ -21,7 +21,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.2.1"
+local PLUGIN_VERSION = "1.2.2"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -333,15 +333,33 @@ function MyAnimeList:_scheduleSync()
 end
 
 function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
+    local function invokeCallback(result, err)
+        local ok, callback_err = xpcall(function()
+            callback(result, err)
+        end, debug.traceback)
+        if not ok then
+            self:showInfo(_("MyAnimeList operation failed: ") .. tostring(callback_err), 10)
+        end
+    end
+
+    local function protectedOperation()
+        local ok, result = xpcall(operation, debug.traceback)
+        if not ok then return envelope({ error = tostring(result) }) end
+        return result
+    end
+
     local function run()
         local trap = quiet and {} or label
-        local completed, encoded = Trapper:dismissableRunInSubprocess(operation, trap, quiet == true)
-        if not completed then return end
+        local completed, encoded = Trapper:dismissableRunInSubprocess(protectedOperation, trap, true)
+        if not completed then
+            invokeCallback(nil, "operation_interrupted")
+            return
+        end
         local result, err = decodeEnvelope(encoded)
         if not result then
-            callback(nil, err)
+            invokeCallback(nil, err)
         else
-            callback(result)
+            invokeCallback(result)
         end
     end
     if Trapper:isWrapped() then return run() end
@@ -604,7 +622,10 @@ function MyAnimeList:_searchSeries(series_key, display_name, initial_query)
                         self:showInfo(_("MyAnimeList search failed: ") .. tostring((result and result.error) or err))
                         return
                     end
-                    self:_showSearchResults(series_key, display_name or query, result.body.data or {})
+                    local results = type(result.body.data) == "table" and result.body.data or {}
+                    UIManager:scheduleIn(0.1, function()
+                        self:_showSearchResults(series_key, display_name or query, results)
+                    end)
                 end, false)
             end },
         }},
@@ -614,7 +635,10 @@ function MyAnimeList:_searchSeries(series_key, display_name, initial_query)
 end
 
 function MyAnimeList:_showSearchResults(series_key, display_name, results)
-    if #results == 0 then self:showInfo(_("No manga matched that search.")); return end
+    if type(results) ~= "table" or #results == 0 then
+        self:showInfo(_("No manga matched that search."))
+        return
+    end
     local rows = {}
     local dialog
     for _, result in ipairs(results) do
@@ -630,6 +654,10 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
                 end,
             }}
         end
+    end
+    if #rows == 0 then
+        self:showInfo(_("No manga matched that search."))
+        return
     end
     dialog = ButtonDialog:new{ title = _("Choose manga"), buttons = rows }
     UIManager:show(dialog)
