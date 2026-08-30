@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.5"
+local PLUGIN_VERSION = "1.4.6"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -863,7 +863,73 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
     local mapping = self.settings.mappings[series_key]
     local editing = mapping ~= nil and node == nil
     local dialog, omnibus_checkbox
+    local size_dialog_requested = false
     local default_size = tonumber(mapping and mapping.omnibus_size) or 3
+
+    local function saveSettings(uses_omnibus, omnibus_size)
+        omnibus_size = omnibus_size or default_size
+        if editing then
+            mapping.omnibus = uses_omnibus == true
+            mapping.omnibus_size = omnibus_size
+            self:saveSettings()
+            self:notify(mapping.omnibus
+                and string.format(_("Omnibus sync enabled: %d MAL volumes per local volume."), omnibus_size)
+                or _("Omnibus sync disabled."), 4)
+            self:scanFinishedVolumes(series_key, nil, false, 0)
+        else
+            self:_saveMapping(series_key, display_name, node, {
+                omnibus = uses_omnibus == true,
+                omnibus_size = omnibus_size,
+            })
+        end
+    end
+
+    local function showOmnibusSizeDialog()
+        local size_dialog
+        size_dialog = InputDialog:new{
+            title = _("Volumes per omnibus"),
+            input = tostring(default_size),
+            input_hint = _("MAL volumes in each omnibus"),
+            input_type = "number",
+            description = _("Local volume N becomes N multiplied by this value. Progress is capped at MyAnimeList's official volume total."),
+            buttons = {{
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function() UIManager:close(size_dialog) end,
+                },
+                {
+                    text = _("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        local omnibus_size = Core.integerVolume(size_dialog:getInputText())
+                        if not omnibus_size or omnibus_size < 2 then
+                            self:showInfo(_("Enter at least 2 volumes per omnibus."))
+                            return
+                        end
+                        UIManager:close(size_dialog)
+                        saveSettings(true, omnibus_size)
+                    end,
+                },
+            }},
+        }
+        UIManager:show(size_dialog)
+        size_dialog:onShowKeyboard()
+    end
+
+    local function requestOmnibusSizeDialog()
+        if size_dialog_requested then return end
+        size_dialog_requested = true
+        UIManager:scheduleIn(0.1, function()
+            if not omnibus_checkbox.checked then
+                size_dialog_requested = false
+                return
+            end
+            UIManager:close(dialog)
+            showOmnibusSizeDialog()
+        end)
+    end
+
     local buttons = {
         { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
     }
@@ -887,53 +953,32 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
         text = _("Save"),
         is_enter_default = true,
         callback = function()
-            local fields = dialog:getFields()
-            local omnibus_size = Core.integerVolume(fields[1])
-            if omnibus_checkbox.checked and (not omnibus_size or omnibus_size < 2) then
-                self:showInfo(_("Enter at least 2 volumes per omnibus."))
-                return
-            end
-            omnibus_size = omnibus_size or default_size
-            UIManager:close(dialog)
-            if editing then
-                mapping.omnibus = omnibus_checkbox.checked == true
-                mapping.omnibus_size = omnibus_size
-                self:saveSettings()
-                self:notify(mapping.omnibus
-                    and string.format(_("Omnibus sync enabled: %d MAL volumes per local volume."), omnibus_size)
-                    or _("Omnibus sync disabled."), 4)
-                self:scanFinishedVolumes(series_key, nil, false, 0)
+            local uses_omnibus = omnibus_checkbox.checked == true
+            if uses_omnibus then
+                requestOmnibusSizeDialog()
             else
-                self:_saveMapping(series_key, display_name, node, {
-                    omnibus = omnibus_checkbox.checked == true,
-                    omnibus_size = omnibus_size,
-                })
+                UIManager:close(dialog)
+                saveSettings(false, default_size)
             end
         end,
     }
 
-    dialog = MultiInputDialog:new{
+    dialog = ButtonDialog:new{
         title = editing
             and string.format(_("Sync settings: %s"), mapping.series_name)
             or _("Series sync settings"),
-        fields = {
-            {
-                text = tostring(default_size),
-                hint = _("MAL volumes in each omnibus"),
-                input_type = "number",
-            },
-        },
-        description = _("For omnibus editions, local volume N becomes N multiplied by this value. Progress is capped at MyAnimeList's official volume total."),
         buttons = { buttons },
     }
     omnibus_checkbox = CheckButton:new{
         text = _("This local series uses omnibus editions"),
         checked = mapping and mapping.omnibus == true or false,
         parent = dialog,
+        callback = function()
+            if omnibus_checkbox.checked then requestOmnibusSizeDialog() end
+        end,
     }
     dialog:addWidget(omnibus_checkbox)
     UIManager:show(dialog)
-    dialog:onShowKeyboard()
 end
 
 function MyAnimeList:showPendingSeries()
