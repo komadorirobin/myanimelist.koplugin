@@ -94,6 +94,16 @@ function Hooks.install(plugin)
     package.loaded.myanimelist_bridge = {
         notify = function(file, status) plugin:onLocalStatusChanged(file, status) end,
     }
+
+    local registry_key = "bookshelf_folder_action_providers"
+    local registry = package.loaded[registry_key]
+    if type(registry) ~= "table" then
+        registry = {}
+        package.loaded[registry_key] = registry
+    end
+    registry.myanimelist = function(folder)
+        return plugin:folderAction(folder)
+    end
 end
 
 return Hooks

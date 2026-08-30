@@ -56,7 +56,7 @@ function Client:_request(method, url, opts)
     local sink = {}
     local headers = {
         ["Accept"] = "application/json",
-        ["User-Agent"] = "KOReader-MyAnimeList/1.2.2",
+        ["User-Agent"] = "KOReader-MyAnimeList/1.3.0",
     }
     if self.config.client_id then headers["X-MAL-CLIENT-ID"] = self.config.client_id end
     if opts.authorized and self.config.access_token then

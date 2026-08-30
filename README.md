@@ -13,6 +13,9 @@ the corresponding manga entry on MyAnimeList.
 - Failed updates remain in a persistent queue and can be retried later.
 - Series are linked once through a MyAnimeList search. Unlinked finished
   series are collected under **Link pending manga**.
+- Manga series can also be linked directly from Bookshelf: long-press a folder
+  below the configured manga root and choose **Link folder to MyAnimeList...**.
+  Long-pressing an already linked folder opens its existing link settings.
 - Linking a series scans its local folder for volumes that were already marked
   finished. The highest finished volume is queued immediately, so an existing
   MAL entry can move from (for example) 3/30 to 21/30 without opening the
@@ -34,7 +37,8 @@ the corresponding manga entry on MyAnimeList.
 4. Choose **Start authorization**, approve access in the browser, return to
    KOReader, then choose **Finish authorization** and paste the callback URL
    or its `code` value.
-5. Mark a manga volume finished. Link the series when prompted.
+5. Mark a manga volume finished and link the series when prompted, or
+   long-press its folder in Bookshelf and link it before reading.
 
 Use **Scan finished volumes** in the plugin menu to repeat the local scan for
 any linked series. Scans run in small UI batches and only inspect the matched

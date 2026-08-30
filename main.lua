@@ -21,7 +21,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.2.2"
+local PLUGIN_VERSION = "1.3.0"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -141,6 +141,47 @@ function MyAnimeList:_isMangaPath(file)
     local root = trim(self.settings.manga_root):gsub("\\", "/"):lower():gsub("/+$", "")
     if root ~= "" and normalized:sub(1, #root + 1) == root .. "/" then return true end
     return normalized:find("/manga/", 1, true) ~= nil
+end
+
+function MyAnimeList:_isMangaFolder(path)
+    local normalized = tostring(path or ""):gsub("\\", "/"):lower():gsub("/+$", "")
+    local root = trim(self.settings.manga_root):gsub("\\", "/"):lower():gsub("/+$", "")
+    if root ~= "" then return normalized:sub(1, #root + 1) == root .. "/" end
+    return normalized:find("/manga/", 1, true) ~= nil
+end
+
+function MyAnimeList:_resolveFolderSeries(folder)
+    if type(folder) ~= "table" or not self:_isMangaFolder(folder.path) then return nil end
+
+    local first_book = folder.first_book
+    if type(first_book) ~= "table" and type(folder.books) == "table" then
+        first_book = folder.books[1]
+    end
+    local filepath = type(first_book) == "table" and first_book.filepath or nil
+    local resolved = filepath and self:_resolveSeries(filepath) or nil
+    if resolved then return resolved end
+
+    local name = trim(folder.label or basename(folder.path))
+    name = name:gsub("_", ":"):gsub("%s*:%s*", ": ")
+    local key = Core.normalizeSeries(name)
+    if name == "" or key == "" then return nil end
+    return { key = key, name = name, file = filepath }
+end
+
+function MyAnimeList:folderAction(folder)
+    local series = self:_resolveFolderSeries(folder)
+    if not series then return nil end
+    local linked = self.settings.mappings[series.key] ~= nil
+    return {
+        text = linked and _("Edit MyAnimeList link...") or _("Link folder to MyAnimeList..."),
+        callback = function()
+            if self.settings.mappings[series.key] then
+                self:showSeriesSettings(series.key)
+            else
+                self:_searchSeries(series.key, series.name, series.name)
+            end
+        end,
+    }
 end
 
 function MyAnimeList:_resolveSeries(file)

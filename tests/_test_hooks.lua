@@ -6,6 +6,12 @@ local plugin = {
     onLocalStatusChanged = function(_, file, status)
         calls[#calls + 1] = { file = file, status = status }
     end,
+    folderAction = function(_, folder)
+        return {
+            text = "Link " .. folder.label,
+            callback = function() callbacks = callbacks + 1 end,
+        }
+    end,
 }
 
 local fmutil = {
@@ -73,6 +79,9 @@ local shelf_result = BookshelfWidget._commitBookStatus({}, {
 assert(shelf_result == "bookshelf-result")
 
 package.loaded.myanimelist_bridge.notify("/Manga/Series/07.epub", "complete")
+local folder_action = package.loaded.bookshelf_folder_action_providers.myanimelist({ label = "Series" })
+assert(folder_action.text == "Link Series")
+folder_action.callback()
 
 local expected = {
     ["/Manga/Series/01.epub"] = true,
@@ -83,7 +92,7 @@ local expected = {
     ["/Manga/Series/06.epub"] = true,
     ["/Manga/Series/07.epub"] = true,
 }
-assert(callbacks == 2)
+assert(callbacks == 3)
 assert(#calls == 7, "expected seven hook notifications, got " .. tostring(#calls))
 for _, call in ipairs(calls) do
     assert(expected[call.file], "unexpected file notification: " .. tostring(call.file))
