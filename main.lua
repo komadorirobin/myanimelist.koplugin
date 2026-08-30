@@ -21,7 +21,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.0"
+local PLUGIN_VERSION = "1.4.1"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -141,17 +141,11 @@ function MyAnimeList:_readStatus(file)
 end
 
 function MyAnimeList:_isMangaPath(file)
-    local normalized = tostring(file or ""):gsub("\\", "/"):lower()
-    local root = trim(self.settings.manga_root):gsub("\\", "/"):lower():gsub("/+$", "")
-    if root ~= "" and normalized:sub(1, #root + 1) == root .. "/" then return true end
-    return normalized:find("/manga/", 1, true) ~= nil
+    return Core.isMangaPath(file, self.settings.manga_root)
 end
 
 function MyAnimeList:_isMangaFolder(path)
-    local normalized = tostring(path or ""):gsub("\\", "/"):lower():gsub("/+$", "")
-    local root = trim(self.settings.manga_root):gsub("\\", "/"):lower():gsub("/+$", "")
-    if root ~= "" then return normalized:sub(1, #root + 1) == root .. "/" end
-    return normalized:find("/manga/", 1, true) ~= nil
+    return Core.isMangaPath(path, self.settings.manga_root)
 end
 
 function MyAnimeList:_resolveFolderSeries(folder)

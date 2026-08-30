@@ -4,6 +4,25 @@ local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$")
 end
 
+local function normalizedPath(value)
+    return tostring(value or ""):gsub("\\", "/"):lower():gsub("/+", "/"):gsub("/+$", "")
+end
+
+-- Android may expose the same storage through /storage/emulated/0, /sdcard,
+-- or a device-specific mount point. Prefer the configured root, but retain a
+-- segment-based fallback so integrations agree across those aliases.
+function Core.isMangaPath(path, root)
+    local normalized = normalizedPath(path)
+    local normalized_root = normalizedPath(root)
+    if normalized == "" then return false end
+    if normalized_root ~= ""
+            and normalized:sub(1, #normalized_root + 1) == normalized_root .. "/" then
+        return true
+    end
+    return normalized:sub(1, 6) == "manga/"
+        or normalized:find("/manga/", 1, true) ~= nil
+end
+
 function Core.normalizeSeries(value)
     local normalized = trim(value):lower()
     normalized = normalized:gsub("_", ":")

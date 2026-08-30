@@ -9,6 +9,12 @@ local function eq(actual, expected, message)
 end
 
 eq(Core.normalizeSeries("Demon Slayer_ Kimetsu no Yaiba"), "demon slayer kimetsu no yaiba")
+eq(Core.isMangaPath("/storage/emulated/0/ePubs/Manga/Attack on Titan", "/storage/emulated/0/ePubs/Manga"), true)
+eq(Core.isMangaPath("/sdcard/ePubs/Manga/Attack on Titan", "/storage/emulated/0/ePubs/Manga"), true,
+    "a storage alias must still be recognized as manga")
+eq(Core.isMangaPath("Manga/Attack on Titan/01.epub", "/storage/emulated/0/ePubs/Manga"), true,
+    "relative Bookshelf paths must be recognized")
+eq(Core.isMangaPath("/storage/emulated/0/ePubs/Fiktion/Book.epub", "/storage/emulated/0/ePubs/Manga"), false)
 eq(Core.cleanSeriesName("Attack on Titan / #31", 31), "Attack on Titan")
 eq(Core.volumeFromText("Attack on Titan, Vol. 27"), 27)
 eq(Core.volumeFromText("Manga_Name-003"), 3)
