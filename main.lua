@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.9"
+local PLUGIN_VERSION = "1.4.10"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -892,36 +892,20 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
     end
 
     local function showOmnibusSizeDialog()
-        local size_dialog
-        size_dialog = InputDialog:new{
-            title = _("Volumes per omnibus"),
-            input = tostring(default_size),
-            input_hint = _("MAL volumes in each omnibus"),
-            input_type = "number",
-            description = _("Local volume N becomes N multiplied by this value. Progress is capped at MyAnimeList's official volume total."),
-            buttons = {{
-                {
-                    text = _("Cancel"),
-                    id = "close",
-                    callback = function() UIManager:close(size_dialog) end,
-                },
-                {
-                    text = _("Save"),
-                    is_enter_default = true,
-                    callback = function()
-                        local omnibus_size = Core.integerVolume(size_dialog:getInputText())
-                        if not omnibus_size or omnibus_size < 2 then
-                            self:showInfo(_("Enter at least 2 volumes per omnibus."))
-                            return
-                        end
-                        UIManager:close(size_dialog)
-                        saveSettings(true, omnibus_size)
-                    end,
-                },
-            }},
-        }
-        UIManager:show(size_dialog)
-        size_dialog:onShowKeyboard()
+        local SpinWidget = require("ui/widget/spinwidget")
+        UIManager:show(SpinWidget:new{
+            title_text = _("Volumes per omnibus"),
+            info_text = _("Local volume N becomes N multiplied by this value. Progress is capped at MyAnimeList's official volume total."),
+            value = math.max(2, Core.integerVolume(default_size) or 3),
+            value_min = 2,
+            value_max = 99,
+            value_step = 1,
+            ok_text = _("Save"),
+            cancel_text = _("Cancel"),
+            callback = function(spin)
+                saveSettings(true, Core.integerVolume(spin.value) or 3)
+            end,
+        })
     end
 
     local function requestOmnibusSizeDialog()
