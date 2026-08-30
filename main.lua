@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.7"
+local PLUGIN_VERSION = "1.4.8"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -186,7 +186,7 @@ function MyAnimeList:folderBadge(folder)
     local mapping = self:_mappingForFolder(folder)
     local mean = mapping and tonumber(mapping.mal_mean)
     if not mean or mean <= 0 then return nil end
-    return { text = string.format("MAL %.2f", mean) }
+    return { text = string.format("\xE2\x98\x85%.2f", mean) }
 end
 
 function MyAnimeList:folderAction(folder)

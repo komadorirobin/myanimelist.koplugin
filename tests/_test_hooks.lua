@@ -13,7 +13,7 @@ local plugin = {
         }
     end,
     folderBadge = function(_, folder)
-        return { text = "MAL " .. folder.score }
+        return { text = "★" .. folder.score }
     end,
 }
 
@@ -86,7 +86,7 @@ local folder_action = package.loaded.bookshelf_folder_action_providers.myanimeli
 assert(folder_action.text == "Link Series")
 folder_action.callback()
 local folder_badge = package.loaded.bookshelf_folder_badge_providers.myanimelist({ score = "8.72" })
-assert(folder_badge.text == "MAL 8.72")
+assert(folder_badge.text == "★8.72")
 
 local expected = {
     ["/Manga/Series/01.epub"] = true,
