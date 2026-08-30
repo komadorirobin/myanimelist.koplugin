@@ -22,7 +22,8 @@ the corresponding manga entry on MyAnimeList.
 - Linking a series scans its local folder for volumes that were already marked
   finished. The highest finished volume is queued immediately, so an existing
   MAL entry can move from (for example) 3/30 to 21/30 without opening the
-  volumes again. The scan can also be run manually per linked series.
+  volumes again. Manually linked folders remain authoritative even when their
+  EPUB series names differ. The scan can also be run manually per linked series.
 - KOReader's regular status controls, SimpleUI status controls and Bookshelf's
   own edit dialog are supported.
 - A linked series can be marked as an omnibus edition. Its local volume number

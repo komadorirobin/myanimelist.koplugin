@@ -62,10 +62,10 @@ function Core.integerVolume(value)
     return math.floor(number)
 end
 
-function Core.finishedVolume(current, target_key, resolved, status)
+function Core.finishedVolume(current, target_key, resolved, status, trusted_folder)
     local highest = tonumber(current) or 0
     if status ~= "complete" or type(resolved) ~= "table"
-            or resolved.key ~= target_key then
+            or (resolved.key ~= target_key and trusted_folder ~= true) then
         return highest, false
     end
     local volume = Core.integerVolume(resolved.volume)

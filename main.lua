@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.6"
+local PLUGIN_VERSION = "1.4.7"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -322,8 +322,9 @@ function MyAnimeList:_startNextFinishedScan()
     end
 
     self._finished_scan_running = true
+    local linked_folder = tostring(mapping.local_folder or "")
     local ok_scan, files = pcall(Scanner.findSeriesFiles,
-        self.settings.manga_root, request.series_key, request.example_file)
+        self.settings.manga_root, request.series_key, request.example_file, linked_folder)
     if not ok_scan or type(files) ~= "table" then
         request.scan_error = tostring(files or "scan_failed")
         self:_finishFinishedScan(request, 0, 0, 0)
@@ -345,8 +346,10 @@ function MyAnimeList:_startNextFinishedScan()
             local file = files[index]
             local status = self:_readStatus(file)
             local resolved = status == "complete" and self:_resolveSeries(file) or nil
+            local trusted_folder = linked_folder ~= ""
+                and Scanner.isInside(file, linked_folder)
             local next_highest, is_match = Core.finishedVolume(
-                highest, request.series_key, resolved, status)
+                highest, request.series_key, resolved, status, trusted_folder)
             highest = next_highest
             if is_match and not matched_volumes[resolved.volume] then
                 matched_volumes[resolved.volume] = true

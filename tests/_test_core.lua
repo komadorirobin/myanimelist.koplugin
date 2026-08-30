@@ -34,10 +34,15 @@ highest, matched = Core.finishedVolume(highest, "attack on titan", {
 }, "complete")
 eq(highest, 21, "another series must not affect the scan")
 eq(matched, false)
+highest, matched = Core.finishedVolume(highest, "attack on titan", {
+    key = "localized metadata name", volume = 22,
+}, "complete", true)
+eq(highest, 22, "an explicitly linked folder may use a different metadata series name")
+eq(matched, true)
 highest = Core.finishedVolume(highest, "attack on titan", {
     key = "attack on titan", volume = 22,
 }, "reading")
-eq(highest, 21, "unfinished volumes must not affect the scan")
+eq(highest, 22, "unfinished volumes must not affect the scan")
 eq(Core.extractAuthorizationCode("https://example.test/callback?code=hello%2Fworld&state=x"), "hello/world")
 eq(Core.extractQueryParameter("https://example.test/callback?code=x&state=hello%20world", "state"), "hello world")
 local token_form = Core.authorizationCodeForm({

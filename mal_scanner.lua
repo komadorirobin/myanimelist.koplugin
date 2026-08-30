@@ -86,11 +86,17 @@ local function collectBooks(path, files, seen, depth)
     end)
 end
 
-function Scanner.findSeriesFiles(root, series_key, example_file)
+function Scanner.findSeriesFiles(root, series_key, example_file, linked_folder)
     root = normalizePath(root)
     if root == "" or mode(root) ~= "directory" then return {}, "manga_root_unavailable" end
 
     local directories, seen_directories = {}, {}
+    linked_folder = normalizePath(linked_folder)
+    if linked_folder ~= "" and Core.isMangaPath(linked_folder, root) then
+        -- A folder chosen explicitly by the user is more reliable than names
+        -- inferred from EPUB metadata, which often vary between editions.
+        addDirectory(directories, seen_directories, linked_folder, linked_folder)
+    end
     local example_directory = dirname(example_file)
     if example_directory and isInside(example_directory, root) then
         addDirectory(directories, seen_directories, example_directory, root)
@@ -112,5 +118,7 @@ Scanner._test = {
     isBookFile = isBookFile,
     isInside = isInside,
 }
+
+Scanner.isInside = isInside
 
 return Scanner

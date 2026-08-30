@@ -1,9 +1,10 @@
 package.path = "./?.lua;" .. package.path
 
 local entries = {
-    ["/library/Manga"] = { ".", "..", "Demon Slayer_ Kimetsu no Yaiba", "Other" },
+    ["/library/Manga"] = { ".", "..", "Demon Slayer_ Kimetsu no Yaiba", "Other", "Localized Folder" },
     ["/library/Manga/Demon Slayer_ Kimetsu no Yaiba"] = { ".", "..", "Vol. 1.epub", "Vol. 2.cbz", "notes.jpg" },
     ["/library/Manga/Other"] = { ".", "..", "Other Vol. 1.epub" },
+    ["/library/Manga/Localized Folder"] = { ".", "..", "Localized Vol. 1.epub" },
 }
 
 local modes = { ["/library/Manga"] = "directory" }
@@ -45,6 +46,12 @@ local files = Scanner.findSeriesFiles(
 assert(#files == 2, "only supported books in the matching series folder should be returned")
 assert(files[1]:match("Vol%. 1%.epub$"))
 assert(files[2]:match("Vol%. 2%.cbz$"))
+
+local linked_files = Scanner.findSeriesFiles(
+    "/library/Manga", "metadata name that does not match", nil,
+    "/library/Manga/Localized Folder")
+assert(#linked_files == 1, "an explicitly linked folder must be scanned even when its name differs")
+assert(linked_files[1]:match("Localized Vol%. 1%.epub$"))
 assert(Scanner._test.isInside("/library/Manga/Series", "/library/Manga"))
 assert(not Scanner._test.isInside("/library/Manga2/Series", "/library/Manga"))
 
