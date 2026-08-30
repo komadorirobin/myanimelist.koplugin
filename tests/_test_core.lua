@@ -34,6 +34,18 @@ highest = Core.finishedVolume(highest, "attack on titan", {
 eq(highest, 21, "unfinished volumes must not affect the scan")
 eq(Core.extractAuthorizationCode("https://example.test/callback?code=hello%2Fworld&state=x"), "hello/world")
 eq(Core.extractQueryParameter("https://example.test/callback?code=x&state=hello%20world", "state"), "hello world")
+local token_form = Core.authorizationCodeForm({
+    client_id = "client",
+    client_secret = "secret",
+    redirect_uri = "https://example.test/callback",
+    pkce_verifier = "verifier",
+}, "authorization-code")
+eq(token_form.client_id, "client")
+eq(token_form.client_secret, "secret")
+eq(token_form.code, "authorization-code")
+eq(token_form.code_verifier, "verifier")
+eq(token_form.grant_type, "authorization_code")
+eq(token_form.redirect_uri, nil, "MAL token exchange must not include redirect_uri")
 local verifier = Core.newPkceVerifier(123)
 eq(#verifier, 64, "PKCE verifier length")
 assert(not verifier:find("[^A-Za-z0-9%-%._~]"), "PKCE verifier contains invalid characters")

@@ -4,6 +4,7 @@ local rapidjson = require("rapidjson")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local util = require("util")
+local Core = require("mal_core")
 
 local Client = {}
 Client.__index = Client
@@ -55,7 +56,7 @@ function Client:_request(method, url, opts)
     local sink = {}
     local headers = {
         ["Accept"] = "application/json",
-        ["User-Agent"] = "KOReader-MyAnimeList/1.2.0",
+        ["User-Agent"] = "KOReader-MyAnimeList/1.2.1",
     }
     if self.config.client_id then headers["X-MAL-CLIENT-ID"] = self.config.client_id end
     if opts.authorized and self.config.access_token then
@@ -85,21 +86,18 @@ function Client:_request(method, url, opts)
     local decoded, decode_err = decode(sink)
     if not decoded then return nil, decode_err, code end
     if code < 200 or code >= 300 then
-        return nil, decoded.message or decoded.error or ("HTTP " .. tostring(code)), code, decoded
+        local message = decoded.message or decoded.error_description or decoded.error or ("HTTP " .. tostring(code))
+        if decoded.hint and decoded.hint ~= "" then
+            message = message .. " (" .. tostring(decoded.hint) .. ")"
+        end
+        return nil, message, code, decoded
     end
     return decoded, nil, code, response_headers
 end
 
 function Client:exchangeCode(code)
     return self:_request("POST", TOKEN_URL, {
-        form = {
-            client_id = self.config.client_id,
-            client_secret = self.config.client_secret,
-            grant_type = "authorization_code",
-            code = code,
-            redirect_uri = self.config.redirect_uri,
-            code_verifier = self.config.pkce_verifier,
-        },
+        form = Core.authorizationCodeForm(self.config, code),
     })
 end
 

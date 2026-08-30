@@ -126,6 +126,17 @@ function Core.extractQueryParameter(value, name)
     end):gsub("+", " "))
 end
 
+function Core.authorizationCodeForm(config, code)
+    config = type(config) == "table" and config or {}
+    return {
+        client_id = config.client_id,
+        client_secret = config.client_secret,
+        grant_type = "authorization_code",
+        code = code,
+        code_verifier = config.pkce_verifier,
+    }
+end
+
 function Core.newPkceVerifier(seed)
     local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
     local random = io.open("/dev/urandom", "rb")
