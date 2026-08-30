@@ -901,6 +901,7 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
             value_max = 99,
             value_step = 1,
             ok_text = _("Save"),
+            ok_always_enabled = true,
             cancel_text = _("Cancel"),
             callback = function(spin)
                 saveSettings(true, Core.integerVolume(spin.value) or 3)
