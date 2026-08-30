@@ -16,12 +16,13 @@ local rapidjson = require("rapidjson")
 local _ = require("gettext")
 local unpack = unpack or table.unpack
 
+local Async = require("mal_async")
 local Client = require("mal_client")
 local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.2"
+local PLUGIN_VERSION = "1.4.3"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -509,11 +510,9 @@ function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
         return result
     end
 
-    local function run()
-        local trap = quiet and {} or label
-        local completed, encoded = Trapper:dismissableRunInSubprocess(protectedOperation, trap, true)
-        if not completed then
-            invokeCallback(nil, "operation_interrupted")
+    Async.run(Trapper, UIManager, protectedOperation, label, function(encoded, transport_err)
+        if not encoded then
+            invokeCallback(nil, transport_err)
             return
         end
         local result, err = decodeEnvelope(encoded)
@@ -522,9 +521,7 @@ function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
         else
             invokeCallback(result)
         end
-    end
-    if Trapper:isWrapped() then return run() end
-    return Trapper:wrap(run)
+    end, quiet, true)
 end
 
 applyTokenResult = function(settings, token)
@@ -789,9 +786,7 @@ function MyAnimeList:_searchSeries(series_key, display_name, initial_query)
                         return
                     end
                     local results = type(result.body.data) == "table" and result.body.data or {}
-                    UIManager:scheduleIn(0.1, function()
-                        self:_showSearchResults(series_key, display_name or query, results)
-                    end)
+                    self:_showSearchResults(series_key, display_name or query, results)
                 end, false)
             end },
         }},
@@ -810,13 +805,14 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
     for _, result in ipairs(results) do
         local node = result.node or result
         if node and node.id then
+            local selected_node = node
             local volumes = tonumber(node.num_volumes) or 0
             local suffix = volumes > 0 and string.format(" (%d %s)", volumes, _("volumes")) or ""
             rows[#rows + 1] = {{
                 text = tostring(node.title or node.id) .. suffix,
                 callback = function()
                     UIManager:close(dialog)
-                    self:showSeriesSettings(series_key, display_name, node)
+                    self:showSeriesSettings(series_key, display_name, selected_node)
                 end,
             }}
         end
@@ -825,7 +821,11 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
         self:showInfo(_("No manga matched that search."))
         return
     end
-    dialog = ButtonDialog:new{ title = _("Choose manga"), buttons = rows }
+    dialog = ButtonDialog:new{
+        title = _("Choose manga"),
+        buttons = rows,
+        rows_per_page = 5,
+    }
     UIManager:show(dialog)
 end
 
