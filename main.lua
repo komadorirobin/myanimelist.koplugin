@@ -1,4 +1,5 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local CheckButton = require("ui/widget/checkbutton")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
@@ -20,7 +21,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.1.0"
+local PLUGIN_VERSION = "1.2.0"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -197,12 +198,15 @@ function MyAnimeList:onLocalStatusChanged(file, known_status)
 end
 
 function MyAnimeList:_enqueue(mapping, volume)
+    local mal_volume = Core.mapLocalVolume(volume, mapping)
+    if not mal_volume then return end
     local id = tostring(mapping.mal_id)
     self.settings.queue[id] = Core.mergeQueue(self.settings.queue[id], {
         mal_id = tonumber(mapping.mal_id),
         series_key = mapping.series_key,
         series_name = mapping.series_name,
-        volumes_read = volume,
+        local_volume = Core.integerVolume(volume),
+        volumes_read = mal_volume,
         requested_at = os.time(),
     })
     self:saveSettings()
@@ -211,6 +215,7 @@ end
 function MyAnimeList:_finishFinishedScan(request, highest, matched, total_files)
     local mapping = self.settings.mappings[request.series_key]
     if mapping and highest > 0 then self:_enqueue(mapping, highest) end
+    local mal_volume = mapping and Core.mapLocalVolume(highest, mapping) or highest
 
     self._finished_scan_running = false
     if request.interactive then
@@ -218,8 +223,8 @@ function MyAnimeList:_finishFinishedScan(request, highest, matched, total_files)
             self:showInfo(_("Could not scan finished volumes: ") .. tostring(request.scan_error))
         elseif highest > 0 then
             self:notify(string.format(
-                _("Found %d finished local volumes; highest volume is %d."),
-                matched, highest), 5)
+                _("Found %d finished local volumes; highest local volume is %d (MAL progress %d)."),
+                matched, highest, mal_volume), 6)
         elseif total_files > 0 then
             self:notify(_("No finished local volumes were found."), 4)
         else
@@ -227,7 +232,8 @@ function MyAnimeList:_finishFinishedScan(request, highest, matched, total_files)
         end
     elseif highest > (tonumber(request.known_volume) or 0) then
         self:notify(string.format(
-            _("MyAnimeList: found finished volumes through volume %d."), highest), 4)
+            _("MyAnimeList: found finished local volumes through %d (MAL progress %d)."),
+            highest, mal_volume), 5)
     end
 
     if self.settings.auto_sync and count(self.settings.queue) > 0 then self:_scheduleSync() end
@@ -620,7 +626,7 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
                 text = tostring(node.title or node.id) .. suffix,
                 callback = function()
                     UIManager:close(dialog)
-                    self:_saveMapping(series_key, display_name, node)
+                    self:showSeriesSettings(series_key, display_name, node)
                 end,
             }}
         end
@@ -629,9 +635,10 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
     UIManager:show(dialog)
 end
 
-function MyAnimeList:_saveMapping(series_key, display_name, node)
+function MyAnimeList:_saveMapping(series_key, display_name, node, format)
     local key = series_key or Core.normalizeSeries(display_name)
     local pending = self.settings.pending_links[key]
+    format = type(format) == "table" and format or {}
     self.settings.mappings[key] = {
         series_key = key,
         series_name = display_name,
@@ -639,6 +646,8 @@ function MyAnimeList:_saveMapping(series_key, display_name, node)
         mal_title = node.title,
         total_volumes = tonumber(node.num_volumes) or 0,
         last_synced = 0,
+        omnibus = format.omnibus == true,
+        omnibus_size = Core.integerVolume(format.omnibus_size) or 3,
     }
     self.settings.pending_links[key] = nil
     local known_volume = pending and tonumber(pending.volume) or 0
@@ -649,6 +658,83 @@ function MyAnimeList:_saveMapping(series_key, display_name, node)
     end
     self:notify(string.format(_("Linked %s to %s."), display_name, tostring(node.title)))
     self:scanFinishedVolumes(key, pending and pending.example_file, false, known_volume)
+end
+
+function MyAnimeList:showSeriesSettings(series_key, display_name, node)
+    local mapping = self.settings.mappings[series_key]
+    local editing = mapping ~= nil and node == nil
+    local dialog, omnibus_checkbox
+    local default_size = tonumber(mapping and mapping.omnibus_size) or 3
+    local buttons = {
+        { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+    }
+    if editing then
+        buttons[#buttons + 1] = {
+            text = _("Unlink"),
+            callback = function()
+                UIManager:close(dialog)
+                UIManager:show(ConfirmBox:new{
+                    text = string.format(_("Unlink %s from MyAnimeList?"), mapping.series_name),
+                    ok_text = _("Unlink"),
+                    ok_callback = function()
+                        self.settings.mappings[series_key] = nil
+                        self:saveSettings()
+                    end,
+                })
+            end,
+        }
+    end
+    buttons[#buttons + 1] = {
+        text = _("Save"),
+        is_enter_default = true,
+        callback = function()
+            local fields = dialog:getFields()
+            local omnibus_size = Core.integerVolume(fields[1])
+            if omnibus_checkbox.checked and (not omnibus_size or omnibus_size < 2) then
+                self:showInfo(_("Enter at least 2 volumes per omnibus."))
+                return
+            end
+            omnibus_size = omnibus_size or default_size
+            UIManager:close(dialog)
+            if editing then
+                mapping.omnibus = omnibus_checkbox.checked == true
+                mapping.omnibus_size = omnibus_size
+                self:saveSettings()
+                self:notify(mapping.omnibus
+                    and string.format(_("Omnibus sync enabled: %d MAL volumes per local volume."), omnibus_size)
+                    or _("Omnibus sync disabled."), 4)
+                self:scanFinishedVolumes(series_key, nil, false, 0)
+            else
+                self:_saveMapping(series_key, display_name, node, {
+                    omnibus = omnibus_checkbox.checked == true,
+                    omnibus_size = omnibus_size,
+                })
+            end
+        end,
+    }
+
+    dialog = MultiInputDialog:new{
+        title = editing
+            and string.format(_("Sync settings: %s"), mapping.series_name)
+            or _("Series sync settings"),
+        fields = {
+            {
+                text = tostring(default_size),
+                hint = _("MAL volumes in each omnibus"),
+                input_type = "number",
+            },
+        },
+        description = _("For omnibus editions, local volume N becomes N multiplied by this value. Progress is capped at MyAnimeList's official volume total."),
+        buttons = { buttons },
+    }
+    omnibus_checkbox = CheckButton:new{
+        text = _("This local series uses omnibus editions"),
+        checked = mapping and mapping.omnibus == true or false,
+        parent = dialog,
+    }
+    dialog:addWidget(omnibus_checkbox)
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 function MyAnimeList:showPendingSeries()
@@ -696,19 +782,16 @@ function MyAnimeList:showLinkedSeries()
     local rows = {}
     local dialog
     for _, key in ipairs(keys) do
-        local mapping = self.settings.mappings[key]
+        local series_key = key
+        local mapping = self.settings.mappings[series_key]
+        local format = mapping.omnibus
+            and string.format(" · %s ×%d", _("omnibus"), tonumber(mapping.omnibus_size) or 3)
+            or ""
         rows[#rows + 1] = {{
-            text = string.format("%s -> %s", mapping.series_name, mapping.mal_title),
+            text = string.format("%s -> %s%s", mapping.series_name, mapping.mal_title, format),
             callback = function()
                 UIManager:close(dialog)
-                UIManager:show(ConfirmBox:new{
-                    text = string.format(_("Unlink %s from MyAnimeList?"), mapping.series_name),
-                    ok_text = _("Unlink"),
-                    ok_callback = function()
-                        self.settings.mappings[key] = nil
-                        self:saveSettings()
-                    end,
-                })
+                self:showSeriesSettings(series_key)
             end,
         }}
     end

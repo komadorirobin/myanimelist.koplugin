@@ -54,6 +54,19 @@ function Core.finishedVolume(current, target_key, resolved, status)
     return math.max(highest, volume), true
 end
 
+function Core.mapLocalVolume(local_volume, mapping)
+    local volume = Core.integerVolume(local_volume)
+    if not volume then return nil end
+    mapping = type(mapping) == "table" and mapping or {}
+    local multiplier = mapping.omnibus == true
+        and math.max(1, Core.integerVolume(mapping.omnibus_size) or 1)
+        or 1
+    local progress = volume * multiplier
+    local total = Core.integerVolume(mapping.total_volumes)
+    if total then progress = math.min(progress, total) end
+    return progress
+end
+
 function Core.mergeQueue(existing, candidate)
     if type(candidate) ~= "table" or not candidate.mal_id then return existing end
     if type(existing) ~= "table" then
@@ -77,8 +90,9 @@ function Core.planUpdate(queue_item, remote_status, total_volumes, last_synced)
     local requested = tonumber(queue_item and queue_item.volumes_read) or 0
     local remote = tonumber(remote_status.num_volumes_read) or 0
     local previous = tonumber(last_synced) or 0
-    local progress = math.max(requested, remote, previous)
     local total = tonumber(total_volumes) or 0
+    if total > 0 then requested = math.min(requested, total) end
+    local progress = math.max(requested, remote, previous)
     local status
     if remote_status.status == "completed" then
         status = "completed"

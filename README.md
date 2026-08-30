@@ -19,6 +19,11 @@ the corresponding manga entry on MyAnimeList.
   volumes again. The scan can also be run manually per linked series.
 - KOReader's regular status controls, SimpleUI status controls and Bookshelf's
   own edit dialog are supported.
+- A linked series can be marked as an omnibus edition. Its local volume number
+  is multiplied by the configured number of original volumes and capped at
+  MAL's official total. A 3-in-1 volume 4 therefore updates MAL to volume 12.
+  A final partial omnibus or standalone volume safely lands on the official
+  final volume instead of exceeding it.
 
 ## Setup
 
@@ -34,6 +39,11 @@ the corresponding manga entry on MyAnimeList.
 Use **Scan finished volumes** in the plugin menu to repeat the local scan for
 any linked series. Scans run in small UI batches and only inspect the matched
 series folder; they do not scan the full library or reduce MAL progress.
+
+Open **Linked series**, select a series and enable **This local series uses
+omnibus editions** to configure how many original MAL volumes each local file
+contains. The same conversion applies to newly finished books and scans of
+books that were already finished.
 
 The default manga root is `/storage/emulated/0/ePubs/Manga` and can be changed
 in the plugin menu. OAuth tokens are stored in KOReader's settings file, like

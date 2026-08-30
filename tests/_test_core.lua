@@ -12,6 +12,12 @@ eq(Core.normalizeSeries("Demon Slayer_ Kimetsu no Yaiba"), "demon slayer kimetsu
 eq(Core.cleanSeriesName("Attack on Titan / #31", 31), "Attack on Titan")
 eq(Core.volumeFromText("Attack on Titan, Vol. 27"), 27)
 eq(Core.volumeFromText("Manga_Name-003"), 3)
+eq(Core.mapLocalVolume(4, { omnibus = true, omnibus_size = 3, total_volumes = 37 }), 12)
+eq(Core.mapLocalVolume(13, { omnibus = true, omnibus_size = 3, total_volumes = 37 }), 37,
+    "a final partial omnibus must be capped at the official MAL total")
+eq(Core.mapLocalVolume(37, { omnibus = true, omnibus_size = 3, total_volumes = 37 }), 37,
+    "a final standalone volume must also be capped safely")
+eq(Core.mapLocalVolume(13, { omnibus = false, omnibus_size = 3, total_volumes = 37 }), 13)
 local highest, matched = Core.finishedVolume(3, "attack on titan", {
     key = "attack on titan", volume = 21,
 }, "complete")
@@ -43,5 +49,8 @@ eq(plan.changed, false)
 plan = Core.planUpdate({ volumes_read = 12 }, { num_volumes_read = 10, status = "reading" }, 12, 10)
 eq(plan.status, "completed")
 eq(plan.changed, true)
+plan = Core.planUpdate({ volumes_read = 39 }, { num_volumes_read = 36, status = "reading" }, 37, 36)
+eq(plan.volumes_read, 37, "queued omnibus progress must be capped when MAL details arrive")
+eq(plan.status, "completed")
 
 print("core tests passed")
