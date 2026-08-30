@@ -33,6 +33,10 @@ the corresponding manga entry on MyAnimeList.
   MAL's official total. A 3-in-1 volume 4 therefore updates MAL to volume 12.
   A final partial omnibus or standalone volume safely lands on the official
   final volume instead of exceeding it.
+- Omnibus editions with uneven mappings can instead use a cumulative ratio.
+  For example, every 2 local deluxe volumes can map to 5 MAL volumes, while a
+  6-volume Master Edition can map to MAL's 10 original volumes. Partial
+  progress is always rounded down so MAL progress is never overstated.
 
 ## Setup
 
@@ -51,9 +55,10 @@ any linked series. Scans run in small UI batches and only inspect the matched
 series folder; they do not scan the full library or reduce MAL progress.
 
 Open **Linked series**, select a series and enable **This local series uses
-omnibus editions** to configure how many original MAL volumes each local file
-contains. The same conversion applies to newly finished books and scans of
-books that were already finished.
+omnibus editions**. Choose either a fixed number of original MAL volumes per
+local file or a custom local-to-MAL ratio for uneven editions. The same
+conversion applies to newly finished books and scans of books that were
+already finished. Existing omnibus links continue to use their fixed count.
 
 The default manga root is `/storage/emulated/0/ePubs/Manga` and can be changed
 in the plugin menu. OAuth tokens are stored in KOReader's settings file, like

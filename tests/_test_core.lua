@@ -33,6 +33,26 @@ eq(Core.mapLocalVolume(13, { omnibus = true, omnibus_size = 3, total_volumes = 3
 eq(Core.mapLocalVolume(37, { omnibus = true, omnibus_size = 3, total_volumes = 37 }), 37,
     "a final standalone volume must also be capped safely")
 eq(Core.mapLocalVolume(13, { omnibus = false, omnibus_size = 3, total_volumes = 37 }), 13)
+eq(Core.mapLocalVolume(1, {
+    omnibus = true, omnibus_mode = "ratio",
+    omnibus_local_count = 2, omnibus_mal_count = 5,
+}), 2, "a partial 2-to-5 ratio must round down")
+eq(Core.mapLocalVolume(2, {
+    omnibus = true, omnibus_mode = "ratio",
+    omnibus_local_count = 2, omnibus_mal_count = 5,
+}), 5)
+eq(Core.mapLocalVolume(3, {
+    omnibus = true, omnibus_mode = "ratio",
+    omnibus_local_count = 2, omnibus_mal_count = 5,
+}), 7)
+eq(Core.mapLocalVolume(6, {
+    omnibus = true, omnibus_mode = "ratio",
+    omnibus_local_count = 6, omnibus_mal_count = 10,
+}), 10, "six Master Edition volumes must map to ten MAL volumes")
+eq(Core.mapLocalVolume(7, {
+    omnibus = true, omnibus_mode = "ratio",
+    omnibus_local_count = 2, omnibus_mal_count = 5, total_volumes = 16,
+}), 16, "ratio progress must be capped at MAL's official total")
 local highest, matched = Core.finishedVolume(3, "attack on titan", {
     key = "attack on titan", volume = 21,
 }, "complete")

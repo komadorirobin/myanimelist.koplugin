@@ -105,10 +105,18 @@ function Core.mapLocalVolume(local_volume, mapping)
     local volume = Core.integerVolume(local_volume)
     if not volume then return nil end
     mapping = type(mapping) == "table" and mapping or {}
-    local multiplier = mapping.omnibus == true
-        and math.max(1, Core.integerVolume(mapping.omnibus_size) or 1)
-        or 1
-    local progress = volume * multiplier
+    local progress = volume
+    if mapping.omnibus == true then
+        local local_count = Core.integerVolume(mapping.omnibus_local_count)
+        local mal_count = Core.integerVolume(mapping.omnibus_mal_count)
+        if mapping.omnibus_mode == "ratio" and local_count and mal_count then
+            -- MAL only accepts whole volumes, so never round partial coverage up.
+            progress = math.max(1, math.floor(volume * mal_count / local_count))
+        else
+            local multiplier = math.max(1, Core.integerVolume(mapping.omnibus_size) or 1)
+            progress = volume * multiplier
+        end
+    end
     local total = Core.integerVolume(mapping.total_volumes)
     if total then progress = math.min(progress, total) end
     return progress

@@ -852,7 +852,10 @@ function MyAnimeList:_saveMapping(series_key, display_name, node, format)
         total_volumes = tonumber(node.num_volumes) or 0,
         last_synced = 0,
         omnibus = format.omnibus == true,
+        omnibus_mode = format.omnibus_mode == "ratio" and "ratio" or "fixed",
         omnibus_size = Core.integerVolume(format.omnibus_size) or 3,
+        omnibus_local_count = Core.integerVolume(format.omnibus_local_count),
+        omnibus_mal_count = Core.integerVolume(format.omnibus_mal_count),
     }
     self._folder_link_paths[key] = nil
     self.settings.pending_links[key] = nil
@@ -870,28 +873,48 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
     local mapping = self.settings.mappings[series_key]
     local editing = mapping ~= nil and node == nil
     local dialog, omnibus_checkbox
-    local size_dialog_requested = false
+    local omnibus_dialog_requested = false
     local default_size = tonumber(mapping and mapping.omnibus_size) or 3
+    local default_mode = mapping and mapping.omnibus_mode == "ratio" and "ratio" or "fixed"
+    local default_local_count = Core.integerVolume(mapping and mapping.omnibus_local_count) or 2
+    local default_mal_count = Core.integerVolume(mapping and mapping.omnibus_mal_count) or 5
 
-    local function saveSettings(uses_omnibus, omnibus_size)
-        omnibus_size = omnibus_size or default_size
+    local function saveSettings(uses_omnibus, format)
+        format = type(format) == "table" and format or {}
+        local omnibus_mode = format.omnibus_mode == "ratio" and "ratio" or "fixed"
+        local omnibus_size = Core.integerVolume(format.omnibus_size) or default_size
+        local omnibus_local_count = Core.integerVolume(format.omnibus_local_count) or default_local_count
+        local omnibus_mal_count = Core.integerVolume(format.omnibus_mal_count) or default_mal_count
         if editing then
             mapping.omnibus = uses_omnibus == true
+            mapping.omnibus_mode = omnibus_mode
             mapping.omnibus_size = omnibus_size
+            mapping.omnibus_local_count = omnibus_local_count
+            mapping.omnibus_mal_count = omnibus_mal_count
             self:saveSettings()
-            self:notify(mapping.omnibus
-                and string.format(_("Omnibus sync enabled: %d MAL volumes per local volume."), omnibus_size)
-                or _("Omnibus sync disabled."), 4)
+            local message = _("Omnibus sync disabled.")
+            if mapping.omnibus and omnibus_mode == "ratio" then
+                message = string.format(
+                    _("Omnibus sync enabled: %d local volumes map to %d MAL volumes."),
+                    omnibus_local_count, omnibus_mal_count)
+            elseif mapping.omnibus then
+                message = string.format(
+                    _("Omnibus sync enabled: %d MAL volumes per local volume."), omnibus_size)
+            end
+            self:notify(message, 4)
             self:scanFinishedVolumes(series_key, nil, false, 0)
         else
             self:_saveMapping(series_key, display_name, node, {
                 omnibus = uses_omnibus == true,
+                omnibus_mode = omnibus_mode,
                 omnibus_size = omnibus_size,
+                omnibus_local_count = omnibus_local_count,
+                omnibus_mal_count = omnibus_mal_count,
             })
         end
     end
 
-    local function showOmnibusSizeDialog()
+    local function showFixedSizeDialog()
         local SpinWidget = require("ui/widget/spinwidget")
         UIManager:show(SpinWidget:new{
             title_text = _("Volumes per omnibus"),
@@ -904,21 +927,91 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
             ok_always_enabled = true,
             cancel_text = _("Cancel"),
             callback = function(spin)
-                saveSettings(true, Core.integerVolume(spin.value) or 3)
+                saveSettings(true, {
+                    omnibus_mode = "fixed",
+                    omnibus_size = Core.integerVolume(spin.value) or 3,
+                })
             end,
         })
     end
 
-    local function requestOmnibusSizeDialog()
-        if size_dialog_requested then return end
-        size_dialog_requested = true
+    local function showRatioMalCountDialog(local_count)
+        local SpinWidget = require("ui/widget/spinwidget")
+        UIManager:show(SpinWidget:new{
+            title_text = _("Corresponding MAL volumes"),
+            info_text = string.format(
+                _("How many original MAL volumes do %d local edition volumes contain? Progress is rounded down and capped at MAL's official total."),
+                local_count),
+            value = default_mal_count,
+            value_min = 1,
+            value_max = 999,
+            value_step = 1,
+            ok_text = _("Save"),
+            ok_always_enabled = true,
+            cancel_text = _("Cancel"),
+            callback = function(spin)
+                saveSettings(true, {
+                    omnibus_mode = "ratio",
+                    omnibus_local_count = local_count,
+                    omnibus_mal_count = Core.integerVolume(spin.value) or default_mal_count,
+                })
+            end,
+        })
+    end
+
+    local function showRatioLocalCountDialog()
+        local SpinWidget = require("ui/widget/spinwidget")
+        UIManager:show(SpinWidget:new{
+            title_text = _("Local edition volumes"),
+            info_text = _("Enter the number of volumes in the local edition ratio. For a 2.5-in-1 edition, enter 2 here and 5 on the next screen."),
+            value = default_local_count,
+            value_min = 1,
+            value_max = 999,
+            value_step = 1,
+            ok_text = _("Next"),
+            ok_always_enabled = true,
+            cancel_text = _("Cancel"),
+            callback = function(spin)
+                showRatioMalCountDialog(Core.integerVolume(spin.value) or default_local_count)
+            end,
+        })
+    end
+
+    local function showOmnibusModeDialog()
+        local mode_dialog
+        mode_dialog = ButtonDialog:new{
+            title = _("Omnibus conversion"),
+            buttons = {
+                {{
+                    text = _("Fixed volumes per local volume"),
+                    callback = function()
+                        UIManager:close(mode_dialog)
+                        showFixedSizeDialog()
+                    end,
+                }},
+                {{
+                    text = _("Custom local-to-MAL ratio"),
+                    callback = function()
+                        UIManager:close(mode_dialog)
+                        showRatioLocalCountDialog()
+                    end,
+                }},
+                {{ text = _("Cancel"), id = "close" }},
+            },
+        }
+        UIManager:show(mode_dialog)
+    end
+
+    local function requestOmnibusDialog()
+        if omnibus_dialog_requested then return end
+        omnibus_dialog_requested = true
         UIManager:scheduleIn(0.1, function()
             if not omnibus_checkbox.checked then
-                size_dialog_requested = false
+                omnibus_dialog_requested = false
                 return
             end
             UIManager:close(dialog)
-            showOmnibusSizeDialog()
+            showOmnibusModeDialog()
         end)
     end
 
@@ -947,10 +1040,15 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
         callback = function()
             local uses_omnibus = omnibus_checkbox.checked == true
             if uses_omnibus then
-                requestOmnibusSizeDialog()
+                requestOmnibusDialog()
             else
                 UIManager:close(dialog)
-                saveSettings(false, default_size)
+                saveSettings(false, {
+                    omnibus_mode = default_mode,
+                    omnibus_size = default_size,
+                    omnibus_local_count = default_local_count,
+                    omnibus_mal_count = default_mal_count,
+                })
             end
         end,
     }
@@ -966,7 +1064,7 @@ function MyAnimeList:showSeriesSettings(series_key, display_name, node)
         checked = mapping and mapping.omnibus == true or false,
         parent = dialog,
         callback = function()
-            if omnibus_checkbox.checked then requestOmnibusSizeDialog() end
+            if omnibus_checkbox.checked then requestOmnibusDialog() end
         end,
     }
     dialog:addWidget(omnibus_checkbox)
@@ -1022,9 +1120,14 @@ function MyAnimeList:showLinkedSeries()
     for key_index, key in ipairs(keys) do
         local series_key = key
         local mapping = self.settings.mappings[series_key]
-        local format = mapping.omnibus
-            and string.format(" · %s ×%d", omnibus_label, tonumber(mapping.omnibus_size) or 3)
-            or ""
+        local format = ""
+        if mapping.omnibus and mapping.omnibus_mode == "ratio" then
+            format = string.format(" · %s %d→%d", omnibus_label,
+                tonumber(mapping.omnibus_local_count) or 2,
+                tonumber(mapping.omnibus_mal_count) or 5)
+        elseif mapping.omnibus then
+            format = string.format(" · %s ×%d", omnibus_label, tonumber(mapping.omnibus_size) or 3)
+        end
         local rating = tonumber(mapping.mal_mean)
             and string.format(" · MAL %.2f", tonumber(mapping.mal_mean))
             or ""
