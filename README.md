@@ -16,6 +16,9 @@ the corresponding manga entry on MyAnimeList.
 - Manga series can also be linked directly from Bookshelf: long-press a folder
   below the configured manga root and choose **Link folder to MyAnimeList...**.
   Long-pressing an already linked folder opens its existing link settings.
+- A cached `MAL 8.72`-style series rating is shown on linked Bookshelf folder
+  cards. New links cache it immediately; **Refresh MAL ratings** updates all
+  existing links. Opening the shelf never performs a network request.
 - Linking a series scans its local folder for volumes that were already marked
   finished. The highest finished volume is queued immediately, so an existing
   MAL entry can move from (for example) 3/30 to 21/30 without opening the

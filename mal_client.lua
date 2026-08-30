@@ -56,7 +56,7 @@ function Client:_request(method, url, opts)
     local sink = {}
     local headers = {
         ["Accept"] = "application/json",
-        ["User-Agent"] = "KOReader-MyAnimeList/1.3.0",
+        ["User-Agent"] = "KOReader-MyAnimeList/1.4.0",
     }
     if self.config.client_id then headers["X-MAL-CLIENT-ID"] = self.config.client_id end
     if opts.authorized and self.config.access_token then
@@ -116,14 +116,14 @@ function Client:searchManga(query)
     local url = API_BASE .. "/manga?" .. formEncode({
         q = query,
         limit = 10,
-        fields = "id,title,alternative_titles,start_date,media_type,status,num_volumes,num_chapters,my_list_status",
+        fields = "id,title,alternative_titles,start_date,media_type,status,num_volumes,num_chapters,mean,my_list_status",
     })
     return self:_request("GET", url, { authorized = self.config.access_token ~= nil })
 end
 
 function Client:getManga(id)
     local url = API_BASE .. "/manga/" .. tostring(id) .. "?" .. formEncode({
-        fields = "id,title,alternative_titles,media_type,status,num_volumes,num_chapters,my_list_status",
+        fields = "id,title,alternative_titles,media_type,status,num_volumes,num_chapters,mean,my_list_status",
     })
     return self:_request("GET", url, { authorized = true })
 end

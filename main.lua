@@ -21,7 +21,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.3.0"
+local PLUGIN_VERSION = "1.4.0"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -86,6 +86,8 @@ local function decodeEnvelope(value)
     return decoded
 end
 
+local applyTokenResult
+
 function MyAnimeList:init()
     self.settings = copyDefaults(G_reader_settings:readSetting("myanimelist", defaults))
     self._recent_events = {}
@@ -93,6 +95,8 @@ function MyAnimeList:init()
     self._sync_running = false
     self._finished_scan_queue = {}
     self._finished_scan_running = false
+    self._folder_link_paths = {}
+    self._ratings_running = false
     Hooks.install(self)
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
@@ -168,16 +172,47 @@ function MyAnimeList:_resolveFolderSeries(folder)
     return { key = key, name = name, file = filepath }
 end
 
+function MyAnimeList:_mappingForFolder(folder)
+    if type(folder) ~= "table" or not self:_isMangaFolder(folder.path) then return nil end
+    local path = tostring(folder.path or ""):gsub("\\", "/"):lower():gsub("/+$", "")
+    for key, mapping in pairs(self.settings.mappings) do
+        local linked_path = tostring(mapping.local_folder or "")
+            :gsub("\\", "/"):lower():gsub("/+$", "")
+        if linked_path ~= "" and linked_path == path then return mapping, key end
+    end
+
+    local name = trim(folder.label or basename(folder.path))
+    name = name:gsub("_", ":"):gsub("%s*:%s*", ": ")
+    local key = Core.normalizeSeries(name)
+    return self.settings.mappings[key], key
+end
+
+function MyAnimeList:folderBadge(folder)
+    local mapping = self:_mappingForFolder(folder)
+    local mean = mapping and tonumber(mapping.mal_mean)
+    if not mean or mean <= 0 then return nil end
+    return { text = string.format("MAL %.2f", mean) }
+end
+
 function MyAnimeList:folderAction(folder)
-    local series = self:_resolveFolderSeries(folder)
+    local mapping, mapped_key = self:_mappingForFolder(folder)
+    local series = mapping and {
+        key = mapped_key,
+        name = mapping.series_name,
+    } or self:_resolveFolderSeries(folder)
     if not series then return nil end
-    local linked = self.settings.mappings[series.key] ~= nil
+    local linked = mapping ~= nil or self.settings.mappings[series.key] ~= nil
     return {
         text = linked and _("Edit MyAnimeList link...") or _("Link folder to MyAnimeList..."),
         callback = function()
             if self.settings.mappings[series.key] then
+                if self.settings.mappings[series.key].local_folder ~= folder.path then
+                    self.settings.mappings[series.key].local_folder = folder.path
+                    self:saveSettings()
+                end
                 self:showSeriesSettings(series.key)
             else
+                self._folder_link_paths[series.key] = folder.path
                 self:_searchSeries(series.key, series.name, series.name)
             end
         end,
@@ -364,6 +399,97 @@ function MyAnimeList:showFinishedVolumeScanner()
     UIManager:show(dialog)
 end
 
+function MyAnimeList:refreshRatings(interactive)
+    if self._ratings_running then
+        if interactive then self:notify(_("MyAnimeList ratings are already being refreshed.")) end
+        return
+    end
+    if not self:isAuthorized() then
+        if interactive then self:showInfo(_("Connect MyAnimeList first.")) end
+        return
+    end
+    if interactive and not NetworkMgr:isConnected() then
+        NetworkMgr:runWhenOnline(function() self:refreshRatings(true) end)
+        return
+    end
+
+    local jobs = {}
+    for key, mapping in pairs(self.settings.mappings) do
+        if mapping.mal_id then jobs[#jobs + 1] = { key = key, mal_id = mapping.mal_id } end
+    end
+    table.sort(jobs, function(a, b) return a.key < b.key end)
+    if #jobs == 0 then
+        if interactive then self:notify(_("No manga series are linked.")) end
+        return
+    end
+
+    local config = {
+        client_id = self.settings.client_id,
+        client_secret = self.settings.client_secret,
+        access_token = self.settings.access_token,
+        refresh_token = self.settings.refresh_token,
+        access_expires_at = self.settings.access_expires_at,
+    }
+    self._ratings_running = true
+    self:_runSubprocess(function()
+        local client = Client.new(config)
+        local result = { ratings = {}, failures = {}, token = nil }
+        if tonumber(config.access_expires_at or 0) <= os.time() + 60 and config.refresh_token then
+            local token, refresh_err = client:refreshToken()
+            if not token then return envelope({ error = refresh_err or "token_refresh_failed" }) end
+            config.access_token = token.access_token
+            config.refresh_token = token.refresh_token or config.refresh_token
+            config.access_expires_at = os.time() + (tonumber(token.expires_in) or 3600)
+            client = Client.new(config)
+            result.token = token
+        end
+        for _, job in ipairs(jobs) do
+            local detail, detail_err = client:getManga(job.mal_id)
+            if detail then
+                result.ratings[#result.ratings + 1] = {
+                    key = job.key,
+                    mean = tonumber(detail.mean),
+                    total_volumes = tonumber(detail.num_volumes),
+                }
+            else
+                result.failures[#result.failures + 1] = { key = job.key, error = detail_err }
+            end
+        end
+        return envelope(result)
+    end, _("Refreshing MyAnimeList ratings..."), function(result, transport_err)
+        self._ratings_running = false
+        if not result then
+            if interactive then
+                self:showInfo(_("Could not refresh MyAnimeList ratings: ") .. tostring(transport_err))
+            end
+            return
+        end
+        if result.token then applyTokenResult(self.settings, result.token) end
+        if result.error then
+            if interactive then
+                self:showInfo(_("Could not refresh MyAnimeList ratings: ") .. tostring(result.error))
+            end
+            return
+        end
+        local rated = 0
+        for _, item in ipairs(result.ratings or {}) do
+            local mapping = self.settings.mappings[item.key]
+            if mapping then
+                mapping.mal_mean = tonumber(item.mean)
+                mapping.rating_updated_at = os.time()
+                mapping.total_volumes = tonumber(item.total_volumes) or mapping.total_volumes
+                if mapping.mal_mean and mapping.mal_mean > 0 then rated = rated + 1 end
+            end
+        end
+        self:saveSettings()
+        if interactive then
+            self:notify(string.format(
+                _("MyAnimeList ratings refreshed: %d rated, %d failed."),
+                rated, #(result.failures or {})), 5)
+        end
+    end, not interactive)
+end
+
 function MyAnimeList:_scheduleSync()
     if self._sync_scheduled or self._sync_running or not self:isAuthorized() then return end
     self._sync_scheduled = true
@@ -407,7 +533,7 @@ function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
     return Trapper:wrap(run)
 end
 
-local function applyTokenResult(settings, token)
+applyTokenResult = function(settings, token)
     if type(token) ~= "table" or not token.access_token then return false end
     settings.access_token = token.access_token
     if token.refresh_token then settings.refresh_token = token.refresh_token end
@@ -494,6 +620,7 @@ function MyAnimeList:syncQueue(interactive)
                         volumes_read = plan.volumes_read,
                         status = plan.status,
                         total_volumes = total,
+                        mean = tonumber(detail.mean),
                     }
                 else
                     result.failures[#result.failures + 1] = { key = job.queue_key, error = update_err }
@@ -521,6 +648,10 @@ function MyAnimeList:syncQueue(interactive)
             if mapping then
                 mapping.last_synced = math.max(tonumber(mapping.last_synced) or 0, tonumber(item.volumes_read) or 0)
                 mapping.total_volumes = tonumber(item.total_volumes) or mapping.total_volumes
+                if tonumber(item.mean) then
+                    mapping.mal_mean = tonumber(item.mean)
+                    mapping.rating_updated_at = os.time()
+                end
                 mapping.last_status = item.status
             end
         end
@@ -713,11 +844,15 @@ function MyAnimeList:_saveMapping(series_key, display_name, node, format)
         series_name = display_name,
         mal_id = tonumber(node.id),
         mal_title = node.title,
+        mal_mean = tonumber(node.mean),
+        rating_updated_at = tonumber(node.mean) and os.time() or nil,
+        local_folder = self._folder_link_paths[key],
         total_volumes = tonumber(node.num_volumes) or 0,
         last_synced = 0,
         omnibus = format.omnibus == true,
         omnibus_size = Core.integerVolume(format.omnibus_size) or 3,
     }
+    self._folder_link_paths[key] = nil
     self.settings.pending_links[key] = nil
     local known_volume = pending and tonumber(pending.volume) or 0
     if known_volume > 0 then
@@ -856,8 +991,11 @@ function MyAnimeList:showLinkedSeries()
         local format = mapping.omnibus
             and string.format(" · %s ×%d", _("omnibus"), tonumber(mapping.omnibus_size) or 3)
             or ""
+        local rating = tonumber(mapping.mal_mean)
+            and string.format(" · MAL %.2f", tonumber(mapping.mal_mean))
+            or ""
         rows[#rows + 1] = {{
-            text = string.format("%s -> %s%s", mapping.series_name, mapping.mal_title, format),
+            text = string.format("%s -> %s%s%s", mapping.series_name, mapping.mal_title, rating, format),
             callback = function()
                 UIManager:close(dialog)
                 self:showSeriesSettings(series_key)
@@ -930,6 +1068,8 @@ function MyAnimeList:addToMainMenu(menu_items)
               callback = function() self:showLinkedSeries() end },
             { text = _("Scan finished volumes"), enabled_func = function() return count(self.settings.mappings) > 0 end,
               callback = function() self:showFinishedVolumeScanner() end },
+            { text = _("Refresh MAL ratings"), enabled_func = function() return count(self.settings.mappings) > 0 end,
+              callback = function() self:refreshRatings(true) end },
             { text = _("Manga folder"), keep_menu_open = true, callback = function() self:editMangaRoot() end, separator = true },
             { text = _("Check for plugin update"), callback = function() Updater.check(self, true) end },
             { text = _("About"), callback = function()

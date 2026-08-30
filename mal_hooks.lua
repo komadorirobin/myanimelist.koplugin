@@ -104,6 +104,16 @@ function Hooks.install(plugin)
     registry.myanimelist = function(folder)
         return plugin:folderAction(folder)
     end
+
+    local badge_registry_key = "bookshelf_folder_badge_providers"
+    local badge_registry = package.loaded[badge_registry_key]
+    if type(badge_registry) ~= "table" then
+        badge_registry = {}
+        package.loaded[badge_registry_key] = badge_registry
+    end
+    badge_registry.myanimelist = function(folder)
+        return plugin:folderBadge(folder)
+    end
 end
 
 return Hooks
