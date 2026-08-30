@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.4"
+local PLUGIN_VERSION = "1.4.5"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -70,7 +70,7 @@ end
 
 local function count(values)
     local total = 0
-    for _ in pairs(values or {}) do total = total + 1 end
+    for key in pairs(values or {}) do total = total + 1 end
     return total
 end
 
@@ -379,7 +379,7 @@ function MyAnimeList:showFinishedVolumeScanner()
     if #keys == 0 then self:notify(_("No manga series are linked.")); return end
     local rows = {}
     local dialog
-    for _, key in ipairs(keys) do
+    for key_index, key in ipairs(keys) do
         local series_key = key
         local mapping = self.settings.mappings[series_key]
         rows[#rows + 1] = {{
@@ -438,7 +438,7 @@ function MyAnimeList:refreshRatings(interactive)
             client = Client.new(config)
             result.token = token
         end
-        for _, job in ipairs(jobs) do
+        for job_index, job in ipairs(jobs) do
             local detail, detail_err = client:getManga(job.mal_id)
             if detail then
                 result.ratings[#result.ratings + 1] = {
@@ -467,7 +467,7 @@ function MyAnimeList:refreshRatings(interactive)
             return
         end
         local rated = 0
-        for _, item in ipairs(result.ratings or {}) do
+        for item_index, item in ipairs(result.ratings or {}) do
             local mapping = self.settings.mappings[item.key]
             if mapping then
                 mapping.mal_mean = tonumber(item.mean)
@@ -559,7 +559,7 @@ function MyAnimeList:syncQueue(interactive)
         access_expires_at = self.settings.access_expires_at,
     }
     local jobs = {}
-    for _, key in ipairs(queue_keys) do
+    for key_index, key in ipairs(queue_keys) do
         local item = self.settings.queue[key]
         local mapping = item and self.settings.mappings[item.series_key]
         if item and mapping then
@@ -584,7 +584,7 @@ function MyAnimeList:syncQueue(interactive)
             client = Client.new(config)
             result.token = token
         end
-        for _, job in ipairs(jobs) do
+        for job_index, job in ipairs(jobs) do
             local detail, detail_err, detail_code = client:getManga(job.item.mal_id)
             if not detail and detail_code == 401 and config.refresh_token then
                 local token = client:refreshToken()
@@ -630,7 +630,7 @@ function MyAnimeList:syncQueue(interactive)
             if interactive then self:showInfo(_("MyAnimeList sync failed: ") .. tostring(result.error)) end
             return
         end
-        for _, item in ipairs(result.successes or {}) do
+        for item_index, item in ipairs(result.successes or {}) do
             local queued = self.settings.queue[item.key]
             if not queued or (tonumber(queued.volumes_read) or 0) <= (tonumber(item.volumes_read) or 0) then
                 self.settings.queue[item.key] = nil
@@ -802,12 +802,13 @@ function MyAnimeList:_showSearchResults(series_key, display_name, results)
     end
     local rows = {}
     local dialog
-    for _, result in ipairs(results) do
+    local volumes_label = _("volumes")
+    for result_index, result in ipairs(results) do
         local node = result.node or result
         if node and node.id then
             local selected_node = node
             local volumes = tonumber(node.num_volumes) or 0
-            local suffix = volumes > 0 and string.format(" (%d %s)", volumes, _("volumes")) or ""
+            local suffix = volumes > 0 and string.format(" (%d %s)", volumes, volumes_label) or ""
             rows[#rows + 1] = {{
                 text = tostring(node.title or node.id) .. suffix,
                 callback = function()
@@ -940,10 +941,11 @@ function MyAnimeList:showPendingSeries()
     if #keys == 0 then self:notify(_("There are no unlinked finished manga series.")); return end
     local rows = {}
     local dialog
-    for _, key in ipairs(keys) do
+    local volume_label = _("volume")
+    for key_index, key in ipairs(keys) do
         local pending = self.settings.pending_links[key]
         rows[#rows + 1] = {{
-            text = string.format("%s (%s %d)", pending.name, _("volume"), tonumber(pending.volume) or 0),
+            text = string.format("%s (%s %d)", pending.name, volume_label, tonumber(pending.volume) or 0),
             callback = function()
                 UIManager:close(dialog)
                 self:_searchSeries(key, pending.name, pending.name)
@@ -979,11 +981,12 @@ function MyAnimeList:showLinkedSeries()
     if #keys == 0 then self:notify(_("No manga series are linked.")); return end
     local rows = {}
     local dialog
-    for _, key in ipairs(keys) do
+    local omnibus_label = _("omnibus")
+    for key_index, key in ipairs(keys) do
         local series_key = key
         local mapping = self.settings.mappings[series_key]
         local format = mapping.omnibus
-            and string.format(" · %s ×%d", _("omnibus"), tonumber(mapping.omnibus_size) or 3)
+            and string.format(" · %s ×%d", omnibus_label, tonumber(mapping.omnibus_size) or 3)
             or ""
         local rating = tonumber(mapping.mal_mean)
             and string.format(" · MAL %.2f", tonumber(mapping.mal_mean))

@@ -9,7 +9,7 @@ local entries = {
 local modes = { ["/library/Manga"] = "directory" }
 for path, names in pairs(entries) do
     modes[path] = "directory"
-    for _, name in ipairs(names) do
+    for name_index, name in ipairs(names) do
         if name ~= "." and name ~= ".." then
             local child = path .. "/" .. name
             if entries[child] then

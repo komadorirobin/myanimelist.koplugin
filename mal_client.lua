@@ -20,7 +20,7 @@ local function formEncode(values)
     end
     table.sort(keys)
     local parts = {}
-    for _, key in ipairs(keys) do
+    for key_index, key in ipairs(keys) do
         parts[#parts + 1] = util.urlEncode(tostring(key)) .. "=" .. util.urlEncode(tostring(values[key]))
     end
     return table.concat(parts, "&")
@@ -56,7 +56,7 @@ function Client:_request(method, url, opts)
     local sink = {}
     local headers = {
         ["Accept"] = "application/json",
-        ["User-Agent"] = "KOReader-MyAnimeList/1.4.4",
+        ["User-Agent"] = "KOReader-MyAnimeList/1.4.5",
     }
     if self.config.client_id then headers["X-MAL-CLIENT-ID"] = self.config.client_id end
     if opts.authorized and self.config.access_token then

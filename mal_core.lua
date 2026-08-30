@@ -49,7 +49,7 @@ function Core.volumeFromText(value)
         "#%s*(%d+)",
         "[%s_%-](%d+)%s*$",
     }
-    for _, pattern in ipairs(patterns) do
+    for pattern_index, pattern in ipairs(patterns) do
         local number = tonumber(text:match(pattern))
         if number and number >= 1 then return number end
     end

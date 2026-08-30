@@ -66,7 +66,7 @@ local function latestRelease()
     local decoded_ok, release = pcall(rapidjson.decode, table.concat(parts))
     if not decoded_ok or type(release) ~= "table" then return nil, "invalid_json" end
     local zip_url
-    for _, asset in ipairs(release.assets or {}) do
+    for asset_index, asset in ipairs(release.assets or {}) do
         if asset.name == "myanimelist.koplugin.zip" or tostring(asset.name):match("%.zip$") then
             zip_url = asset.browser_download_url
             break

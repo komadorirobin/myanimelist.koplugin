@@ -101,7 +101,7 @@ function Scanner.findSeriesFiles(root, series_key, example_file)
     findNamedDirectories(root, root, series_key, directories, seen_directories, 3)
 
     local files, seen_files = {}, {}
-    for _, directory in ipairs(directories) do
+    for directory_index, directory in ipairs(directories) do
         collectBooks(directory, files, seen_files, 6)
     end
     table.sort(files)

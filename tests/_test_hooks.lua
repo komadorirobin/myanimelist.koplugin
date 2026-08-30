@@ -99,7 +99,7 @@ local expected = {
 }
 assert(callbacks == 3)
 assert(#calls == 7, "expected seven hook notifications, got " .. tostring(#calls))
-for _, call in ipairs(calls) do
+for call_index, call in ipairs(calls) do
     assert(expected[call.file], "unexpected file notification: " .. tostring(call.file))
     expected[call.file] = nil
 end
