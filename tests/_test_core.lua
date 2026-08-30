@@ -12,6 +12,20 @@ eq(Core.normalizeSeries("Demon Slayer_ Kimetsu no Yaiba"), "demon slayer kimetsu
 eq(Core.cleanSeriesName("Attack on Titan / #31", 31), "Attack on Titan")
 eq(Core.volumeFromText("Attack on Titan, Vol. 27"), 27)
 eq(Core.volumeFromText("Manga_Name-003"), 3)
+local highest, matched = Core.finishedVolume(3, "attack on titan", {
+    key = "attack on titan", volume = 21,
+}, "complete")
+eq(highest, 21, "finished scan should use the highest matching volume")
+eq(matched, true)
+highest, matched = Core.finishedVolume(highest, "attack on titan", {
+    key = "another series", volume = 30,
+}, "complete")
+eq(highest, 21, "another series must not affect the scan")
+eq(matched, false)
+highest = Core.finishedVolume(highest, "attack on titan", {
+    key = "attack on titan", volume = 22,
+}, "reading")
+eq(highest, 21, "unfinished volumes must not affect the scan")
 eq(Core.extractAuthorizationCode("https://example.test/callback?code=hello%2Fworld&state=x"), "hello/world")
 eq(Core.extractQueryParameter("https://example.test/callback?code=x&state=hello%20world", "state"), "hello world")
 local verifier = Core.newPkceVerifier(123)

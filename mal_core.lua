@@ -43,6 +43,17 @@ function Core.integerVolume(value)
     return math.floor(number)
 end
 
+function Core.finishedVolume(current, target_key, resolved, status)
+    local highest = tonumber(current) or 0
+    if status ~= "complete" or type(resolved) ~= "table"
+            or resolved.key ~= target_key then
+        return highest, false
+    end
+    local volume = Core.integerVolume(resolved.volume)
+    if not volume then return highest, false end
+    return math.max(highest, volume), true
+end
+
 function Core.mergeQueue(existing, candidate)
     if type(candidate) ~= "table" or not candidate.mal_id then return existing end
     if type(existing) ~= "table" then

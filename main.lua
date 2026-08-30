@@ -18,8 +18,9 @@ local unpack = unpack or table.unpack
 local Client = require("mal_client")
 local Core = require("mal_core")
 local Hooks = require("mal_hooks")
+local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.0.0"
+local PLUGIN_VERSION = "1.1.0"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -89,6 +90,8 @@ function MyAnimeList:init()
     self._recent_events = {}
     self._sync_scheduled = false
     self._sync_running = false
+    self._finished_scan_queue = {}
+    self._finished_scan_running = false
     Hooks.install(self)
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
@@ -203,6 +206,115 @@ function MyAnimeList:_enqueue(mapping, volume)
         requested_at = os.time(),
     })
     self:saveSettings()
+end
+
+function MyAnimeList:_finishFinishedScan(request, highest, matched, total_files)
+    local mapping = self.settings.mappings[request.series_key]
+    if mapping and highest > 0 then self:_enqueue(mapping, highest) end
+
+    self._finished_scan_running = false
+    if request.interactive then
+        if request.scan_error then
+            self:showInfo(_("Could not scan finished volumes: ") .. tostring(request.scan_error))
+        elseif highest > 0 then
+            self:notify(string.format(
+                _("Found %d finished local volumes; highest volume is %d."),
+                matched, highest), 5)
+        elseif total_files > 0 then
+            self:notify(_("No finished local volumes were found."), 4)
+        else
+            self:notify(_("No local files were found for that linked series."), 4)
+        end
+    elseif highest > (tonumber(request.known_volume) or 0) then
+        self:notify(string.format(
+            _("MyAnimeList: found finished volumes through volume %d."), highest), 4)
+    end
+
+    if self.settings.auto_sync and count(self.settings.queue) > 0 then self:_scheduleSync() end
+    UIManager:scheduleIn(0, function() self:_startNextFinishedScan() end)
+end
+
+function MyAnimeList:_startNextFinishedScan()
+    if self._finished_scan_running then return end
+    local request = table.remove(self._finished_scan_queue, 1)
+    if not request then return end
+    local mapping = self.settings.mappings[request.series_key]
+    if not mapping then
+        UIManager:scheduleIn(0, function() self:_startNextFinishedScan() end)
+        return
+    end
+
+    self._finished_scan_running = true
+    local ok_scan, files = pcall(Scanner.findSeriesFiles,
+        self.settings.manga_root, request.series_key, request.example_file)
+    if not ok_scan or type(files) ~= "table" then
+        request.scan_error = tostring(files or "scan_failed")
+        self:_finishFinishedScan(request, 0, 0, 0)
+        return
+    end
+    if request.interactive then
+        self:notify(string.format(_("Scanning %s for finished volumes..."), mapping.series_name), 3)
+    end
+    if #files == 0 then
+        self:_finishFinishedScan(request, 0, 0, 0)
+        return
+    end
+
+    local index, highest, matched = 1, 0, 0
+    local matched_volumes = {}
+    local function step()
+        local last = math.min(index + 7, #files)
+        while index <= last do
+            local file = files[index]
+            local status = self:_readStatus(file)
+            local resolved = status == "complete" and self:_resolveSeries(file) or nil
+            local next_highest, is_match = Core.finishedVolume(
+                highest, request.series_key, resolved, status)
+            highest = next_highest
+            if is_match and not matched_volumes[resolved.volume] then
+                matched_volumes[resolved.volume] = true
+                matched = matched + 1
+            end
+            index = index + 1
+        end
+        if index <= #files then
+            UIManager:scheduleIn(0, step)
+        else
+            self:_finishFinishedScan(request, highest, matched, #files)
+        end
+    end
+    UIManager:scheduleIn(0, step)
+end
+
+function MyAnimeList:scanFinishedVolumes(series_key, example_file, interactive, known_volume)
+    if not self.settings.mappings[series_key] then return end
+    self._finished_scan_queue[#self._finished_scan_queue + 1] = {
+        series_key = series_key,
+        example_file = example_file,
+        interactive = interactive == true,
+        known_volume = tonumber(known_volume) or 0,
+    }
+    self:_startNextFinishedScan()
+end
+
+function MyAnimeList:showFinishedVolumeScanner()
+    local keys = Core.sortedKeys(self.settings.mappings)
+    if #keys == 0 then self:notify(_("No manga series are linked.")); return end
+    local rows = {}
+    local dialog
+    for _, key in ipairs(keys) do
+        local series_key = key
+        local mapping = self.settings.mappings[series_key]
+        rows[#rows + 1] = {{
+            text = string.format("%s -> %s", mapping.series_name, mapping.mal_title),
+            callback = function()
+                UIManager:close(dialog)
+                self:scanFinishedVolumes(series_key, nil, true)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{ title = _("Scan finished volumes"), buttons = rows }
+    UIManager:show(dialog)
 end
 
 function MyAnimeList:_scheduleSync()
@@ -529,13 +641,14 @@ function MyAnimeList:_saveMapping(series_key, display_name, node)
         last_synced = 0,
     }
     self.settings.pending_links[key] = nil
-    if pending and tonumber(pending.volume) then
-        self:_enqueue(self.settings.mappings[key], tonumber(pending.volume))
+    local known_volume = pending and tonumber(pending.volume) or 0
+    if known_volume > 0 then
+        self:_enqueue(self.settings.mappings[key], known_volume)
     else
         self:saveSettings()
     end
     self:notify(string.format(_("Linked %s to %s."), display_name, tostring(node.title)))
-    if self.settings.auto_sync then self:_scheduleSync() end
+    self:scanFinishedVolumes(key, pending and pending.example_file, false, known_volume)
 end
 
 function MyAnimeList:showPendingSeries()
@@ -663,6 +776,8 @@ function MyAnimeList:addToMainMenu(menu_items)
             { text = _("Link a series manually"), callback = function() self:linkSeriesManually() end },
             { text_func = function() return string.format(_("Linked series (%d)"), count(self.settings.mappings)) end,
               callback = function() self:showLinkedSeries() end },
+            { text = _("Scan finished volumes"), enabled_func = function() return count(self.settings.mappings) > 0 end,
+              callback = function() self:showFinishedVolumeScanner() end },
             { text = _("Manga folder"), keep_menu_open = true, callback = function() self:editMangaRoot() end, separator = true },
             { text = _("Check for plugin update"), callback = function() Updater.check(self, true) end },
             { text = _("About"), callback = function()
