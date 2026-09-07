@@ -26,7 +26,10 @@ local fmutil = {
     end,
 }
 local ReaderStatus = {
-    markBook = function() return "reader-result" end,
+    markBook = function(instance)
+        instance.ui.doc_settings.summary.status = "complete"
+        return "reader-result"
+    end,
 }
 local BookStatusWidget = {
     onClose = function(instance)
@@ -61,8 +64,21 @@ local multi = fmutil.genMultipleStatusButtonsRow({
 end)
 assert(multi() == "multi-result")
 
-local reader_result = ReaderStatus.markBook({ document = { file = "/Manga/Series/04.epub" } })
+local reader_summary = { status = "reading" }
+local reader_result = ReaderStatus.markBook({
+    document = { file = "/Manga/Series/04.epub" },
+    ui = {
+        doc_settings = {
+            summary = reader_summary,
+            readSetting = function(instance, key)
+                assert(key == "summary")
+                return instance.summary
+            end,
+        },
+    },
+})
 assert(reader_result == "reader-result")
+assert(reader_summary.status == "complete")
 
 local close_callbacks = 0
 local widget_result = BookStatusWidget.onClose({
@@ -105,6 +121,7 @@ for call_index, call in ipairs(calls) do
 end
 assert(calls[6].status == "complete")
 assert(calls[7].status == "complete")
+assert(calls[4].status == "complete", "reader hook must forward the in-memory status")
 for file in pairs(expected) do error("missing notification: " .. file) end
 
 print("hook tests passed")

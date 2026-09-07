@@ -18,6 +18,22 @@ local function resolveFile(doc_settings_or_file)
     return nil
 end
 
+local function resolveReaderStatus(instance)
+    local ui = instance and instance.ui
+    local document = (instance and instance.document) or (ui and ui.document)
+    local file = document and document.file
+    local doc_settings = ui and ui.doc_settings
+    if not file or not doc_settings or type(doc_settings.readSetting) ~= "function" then
+        return file, nil
+    end
+
+    local ok, summary = pcall(doc_settings.readSetting, doc_settings, "summary")
+    if ok and type(summary) == "table" then
+        return file, summary.status
+    end
+    return file, nil
+end
+
 function Hooks.install(plugin)
     local ok_fm, fmutil = pcall(require, "apps/filemanager/filemanagerutil")
     if ok_fm and fmutil and not fmutil._myanimelist_status_patched then
@@ -53,8 +69,10 @@ function Hooks.install(plugin)
         local original = ReaderStatus.markBook
         ReaderStatus.markBook = function(instance, ...)
             local results = { original(instance, ...) }
-            local file = instance.document and instance.document.file
-            if file then plugin:onLocalStatusChanged(file) end
+            -- ReaderStatus mutates the in-memory summary before the sidecar is
+            -- flushed. Pass that status directly instead of reopening stale data.
+            local file, status = resolveReaderStatus(instance)
+            if file then plugin:onLocalStatusChanged(file, status) end
             return unpack(results)
         end
     end
