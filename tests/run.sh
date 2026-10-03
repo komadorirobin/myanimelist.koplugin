@@ -2,10 +2,12 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-LUA_BIN="$(command -v lua5.1 || command -v lua)"
+LUA_BIN="${LUA_BIN:-$(command -v lua5.1 || command -v lua)}"
 LUAC_BIN="$(command -v luac5.1 || command -v luac)"
 
 "$LUA_BIN" tests/_test_core.lua
+"$LUA_BIN" tests/_test_client.lua
+"$LUA_BIN" tests/_test_account.lua
 "$LUA_BIN" tests/_test_hooks.lua
 "$LUA_BIN" tests/_test_scanner.lua
 "$LUA_BIN" tests/_test_async.lua

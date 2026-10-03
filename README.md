@@ -64,6 +64,26 @@ The default manga root is `/storage/emulated/0/ePubs/Manga` and can be changed
 in the plugin menu. OAuth tokens are stored in KOReader's settings file, like
 credentials used by other KOReader synchronization plugins.
 
+## Authorization recovery (1.5.2)
+
+Search, rating refresh and reading-progress sync share token renewal. They renew
+an expired access token before sending a request and retry an unexpected
+`invalid_token`/HTTP 401 response at most once. Rotated credentials are saved
+even when the following API request fails. Account jobs are serialized across
+FileManager and ReaderUI so overlapping operations cannot rotate tokens at the
+same time.
+
+The Account menu reports **token renewal pending** for expired credentials and
+**authorization required** when MAL rejects renewal. A saved **connected** state
+is not a live server check; requests validate it. Network errors and rate limits
+do not erase credentials, linked series or pending updates.
+
+If renewal is rejected, use **Account > Start authorization**, then
+**Finish authorization** again. There is no need to unlink series or reinstall
+the plugin. Correct the API client settings first if those have changed.
+This also provides a workaround for older versions whose searches do not renew
+tokens. See [MAL's authorization reference](https://myanimelist.net/apiconfig/references/authorization#refreshing-an-access-token).
+
 ## OTA updates
 
 Use **Tools > MyAnimeList Manga Sync > Check for plugin update**. Stable

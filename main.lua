@@ -22,7 +22,7 @@ local Core = require("mal_core")
 local Hooks = require("mal_hooks")
 local Scanner = require("mal_scanner")
 
-local PLUGIN_VERSION = "1.4.10"
+local PLUGIN_VERSION = "1.5.2"
 local DEFAULT_MANGA_ROOT = "/storage/emulated/0/ePubs/Manga"
 
 local MyAnimeList = WidgetContainer:extend{
@@ -88,6 +88,16 @@ local function decodeEnvelope(value)
 end
 
 local applyTokenResult
+-- FileManager and ReaderUI can both own a plugin instance for the same account.
+local account_jobs, subprocess_running, account_generation = {}, false, 0
+
+local function accountError(err)
+    if err == "authorization_required" then
+        return _("MyAnimeList authorization needs to be renewed. Under Account, choose 'Start authorization', then 'Finish authorization'. Check API client settings if reconnecting fails. Your linked series and pending updates are kept.")
+    end
+    if err == "account_changed" then return _("MyAnimeList account settings changed. Try again.") end
+    return tostring(err)
+end
 
 function MyAnimeList:init()
     self.settings = copyDefaults(G_reader_settings:readSetting("myanimelist", defaults))
@@ -110,6 +120,7 @@ end
 
 function MyAnimeList:isAuthorized()
     return trim(self.settings.client_id) ~= "" and trim(self.settings.access_token) ~= ""
+        and not self.settings.authorization_required
 end
 
 function MyAnimeList:notify(text, timeout)
@@ -407,7 +418,10 @@ function MyAnimeList:refreshRatings(interactive)
         return
     end
     if not self:isAuthorized() then
-        if interactive then self:showInfo(_("Connect MyAnimeList first.")) end
+        if interactive then
+            self:showInfo(self.settings.authorization_required and accountError("authorization_required")
+                or _("Connect MyAnimeList first."), 10)
+        end
         return
     end
     if interactive and not NetworkMgr:isConnected() then
@@ -425,26 +439,9 @@ function MyAnimeList:refreshRatings(interactive)
         return
     end
 
-    local config = {
-        client_id = self.settings.client_id,
-        client_secret = self.settings.client_secret,
-        access_token = self.settings.access_token,
-        refresh_token = self.settings.refresh_token,
-        access_expires_at = self.settings.access_expires_at,
-    }
     self._ratings_running = true
-    self:_runSubprocess(function()
-        local client = Client.new(config)
-        local result = { ratings = {}, failures = {}, token = nil }
-        if tonumber(config.access_expires_at or 0) <= os.time() + 60 and config.refresh_token then
-            local token, refresh_err = client:refreshToken()
-            if not token then return envelope({ error = refresh_err or "token_refresh_failed" }) end
-            config.access_token = token.access_token
-            config.refresh_token = token.refresh_token or config.refresh_token
-            config.access_expires_at = os.time() + (tonumber(token.expires_in) or 3600)
-            client = Client.new(config)
-            result.token = token
-        end
+    self:_runAccountOperation(function(client)
+        local result = { ratings = {}, failures = {} }
         for job_index, job in ipairs(jobs) do
             local detail, detail_err = client:getManga(job.mal_id)
             if detail then
@@ -457,7 +454,7 @@ function MyAnimeList:refreshRatings(interactive)
                 result.failures[#result.failures + 1] = { key = job.key, error = detail_err }
             end
         end
-        return envelope(result)
+        return result
     end, _("Refreshing MyAnimeList ratings..."), function(result, transport_err)
         self._ratings_running = false
         if not result then
@@ -466,10 +463,9 @@ function MyAnimeList:refreshRatings(interactive)
             end
             return
         end
-        if result.token then applyTokenResult(self.settings, result.token) end
         if result.error then
             if interactive then
-                self:showInfo(_("Could not refresh MyAnimeList ratings: ") .. tostring(result.error))
+                self:showInfo(_("Could not refresh MyAnimeList ratings: ") .. accountError(result.error), 10)
             end
             return
         end
@@ -484,7 +480,9 @@ function MyAnimeList:refreshRatings(interactive)
             end
         end
         self:saveSettings()
-        if interactive then
+        if result.authorization_required then
+            self:showInfo(accountError("authorization_required"), 10)
+        elseif interactive then
             self:notify(string.format(
                 _("MyAnimeList ratings refreshed: %d rated, %d failed."),
                 rated, #(result.failures or {})), 5)
@@ -502,22 +500,40 @@ function MyAnimeList:_scheduleSync()
 end
 
 function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
+    account_jobs[#account_jobs + 1] = {
+        plugin = self, operation = operation, label = label, callback = callback, quiet = quiet,
+    }
+    self:_startNextSubprocess()
+end
+
+function MyAnimeList:_startNextSubprocess()
+    if subprocess_running or #account_jobs == 0 then return end
+    local job = table.remove(account_jobs, 1)
+    self = job.plugin
+    subprocess_running = true
+    self._subprocess_running = true
+    local delivered = false
     local function invokeCallback(result, err)
+        if delivered then return end
+        delivered = true
         local ok, callback_err = xpcall(function()
-            callback(result, err)
+            job.callback(result, err)
         end, debug.traceback)
+        self._subprocess_running = false
+        subprocess_running = false
+        UIManager:scheduleIn(0.1, function() self:_startNextSubprocess() end)
         if not ok then
             self:showInfo(_("MyAnimeList operation failed: ") .. tostring(callback_err), 10)
         end
     end
 
     local function protectedOperation()
-        local ok, result = xpcall(operation, debug.traceback)
+        local ok, result = xpcall(job.operation, debug.traceback)
         if not ok then return envelope({ error = tostring(result) }) end
         return result
     end
 
-    Async.run(Trapper, UIManager, protectedOperation, label, function(encoded, transport_err)
+    local ok, run_err = pcall(Async.run, Trapper, UIManager, protectedOperation, job.label, function(encoded, transport_err)
         if not encoded then
             invokeCallback(nil, transport_err)
             return
@@ -528,15 +544,42 @@ function MyAnimeList:_runSubprocess(operation, label, callback, quiet)
         else
             invokeCallback(result)
         end
-    end, quiet, true)
+    end, job.quiet, true)
+    if not ok then invokeCallback(nil, tostring(run_err)) end
 end
 
-applyTokenResult = function(settings, token)
-    if type(token) ~= "table" or not token.access_token then return false end
-    settings.access_token = token.access_token
-    if token.refresh_token then settings.refresh_token = token.refresh_token end
-    settings.access_expires_at = os.time() + (tonumber(token.expires_in) or 3600)
-    return true
+applyTokenResult = Client.applyToken
+
+function MyAnimeList:_runAccountOperation(operation, label, callback, quiet)
+    local generation = account_generation
+    self:_runSubprocess(function()
+        if generation ~= account_generation then
+            return envelope({ error = "account_changed" })
+        end
+        -- Snapshot credentials when this worker starts, after any earlier worker
+        -- has persisted its renewed token. MAL revokes the previous access token.
+        local client = Client.new(Client.configFromSettings(self.settings))
+        local ok, result = xpcall(function() return operation(client) end, debug.traceback)
+        if not ok then result = { error = tostring(result) } end
+        return envelope(client:sessionResult(result))
+    end, label, function(result, err)
+        if generation ~= account_generation then
+            callback(nil, "account_changed")
+            return
+        end
+        local changed = result and result.token and applyTokenResult(self.settings, result.token)
+        if result and result.access_rejected and not result.token then
+            self.settings.access_expires_at = 0
+            changed = true
+        end
+        if result and result.authorization_required then
+            self.settings.authorization_required = true
+            changed = true
+        end
+        -- Persist rotation even if the API operation failed or its UI callback throws.
+        if changed then self:saveSettings() end
+        callback(result, err)
+    end, quiet)
 end
 
 function MyAnimeList:syncQueue(interactive)
@@ -545,7 +588,10 @@ function MyAnimeList:syncQueue(interactive)
         return
     end
     if not self:isAuthorized() then
-        if interactive then self:showInfo(_("Connect MyAnimeList first.")) end
+        if interactive then
+            self:showInfo(self.settings.authorization_required and accountError("authorization_required")
+                or _("Connect MyAnimeList first."), 10)
+        end
         return
     end
     if interactive and not NetworkMgr:isConnected() then
@@ -558,13 +604,6 @@ function MyAnimeList:syncQueue(interactive)
         return
     end
 
-    local config = {
-        client_id = self.settings.client_id,
-        client_secret = self.settings.client_secret,
-        access_token = self.settings.access_token,
-        refresh_token = self.settings.refresh_token,
-        access_expires_at = self.settings.access_expires_at,
-    }
     local jobs = {}
     for key_index, key in ipairs(queue_keys) do
         local item = self.settings.queue[key]
@@ -579,31 +618,10 @@ function MyAnimeList:syncQueue(interactive)
         end
     end
     self._sync_running = true
-    self:_runSubprocess(function()
-        local client = Client.new(config)
-        local result = { successes = {}, failures = {}, token = nil }
-        if tonumber(config.access_expires_at or 0) <= os.time() + 60 and config.refresh_token then
-            local token, refresh_err = client:refreshToken()
-            if not token then return envelope({ error = refresh_err or "token_refresh_failed" }) end
-            config.access_token = token.access_token
-            config.refresh_token = token.refresh_token or config.refresh_token
-            config.access_expires_at = os.time() + (tonumber(token.expires_in) or 3600)
-            client = Client.new(config)
-            result.token = token
-        end
+    self:_runAccountOperation(function(client)
+        local result = { successes = {}, failures = {} }
         for job_index, job in ipairs(jobs) do
-            local detail, detail_err, detail_code = client:getManga(job.item.mal_id)
-            if not detail and detail_code == 401 and config.refresh_token then
-                local token = client:refreshToken()
-                if token then
-                    config.access_token = token.access_token
-                    config.refresh_token = token.refresh_token or config.refresh_token
-                    config.access_expires_at = os.time() + (tonumber(token.expires_in) or 3600)
-                    client = Client.new(config)
-                    result.token = token
-                    detail, detail_err = client:getManga(job.item.mal_id)
-                end
-            end
+            local detail, detail_err = client:getManga(job.item.mal_id)
             if not detail then
                 result.failures[#result.failures + 1] = { key = job.queue_key, error = detail_err }
             else
@@ -625,16 +643,15 @@ function MyAnimeList:syncQueue(interactive)
                 end
             end
         end
-        return envelope(result)
+        return result
     end, _("Syncing manga with MyAnimeList..."), function(result, transport_err)
         self._sync_running = false
         if not result then
             if interactive then self:showInfo(_("MyAnimeList sync failed: ") .. tostring(transport_err)) end
             return
         end
-        if result.token and applyTokenResult(self.settings, result.token) then self:saveSettings() end
         if result.error then
-            if interactive then self:showInfo(_("MyAnimeList sync failed: ") .. tostring(result.error)) end
+            if interactive then self:showInfo(_("MyAnimeList sync failed: ") .. accountError(result.error), 10) end
             return
         end
         for item_index, item in ipairs(result.successes or {}) do
@@ -656,7 +673,9 @@ function MyAnimeList:syncQueue(interactive)
         self:saveSettings()
         local success_count = #(result.successes or {})
         local failure_count = #(result.failures or {})
-        if interactive or failure_count > 0 then
+        if result.authorization_required then
+            self:showInfo(accountError("authorization_required"), 10)
+        elseif interactive or failure_count > 0 then
             self:notify(string.format(_("MyAnimeList: %d updated, %d failed."), success_count, failure_count), 4)
         end
     end, not interactive)
@@ -676,8 +695,20 @@ function MyAnimeList:editApiSettings()
             { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             { text = _("Save"), is_enter_default = true, callback = function()
                 local client_id, secret, redirect = unpack(dialog:getFields())
-                self.settings.client_id = trim(client_id) ~= "" and trim(client_id) or nil
-                self.settings.client_secret = trim(secret) ~= "" and trim(secret) or nil
+                client_id = trim(client_id) ~= "" and trim(client_id) or nil
+                secret = trim(secret) ~= "" and trim(secret) or nil
+                if client_id ~= self.settings.client_id or secret ~= self.settings.client_secret then
+                    account_generation = account_generation + 1
+                    if client_id ~= self.settings.client_id then
+                        self.settings.authorization_required = self.settings.access_token and true or nil
+                    else
+                        -- Correcting a client secret can make the saved refresh token usable again.
+                        self.settings.authorization_required = nil
+                        self.settings.access_expires_at = 0
+                    end
+                end
+                self.settings.client_id = client_id
+                self.settings.client_secret = secret
                 self.settings.redirect_uri = trim(redirect) ~= "" and trim(redirect) or "https://myanimelist.net/"
                 self:saveSettings()
                 UIManager:close(dialog)
@@ -729,6 +760,8 @@ function MyAnimeList:finishAuthorization()
                 local code = Core.extractAuthorizationCode(entered)
                 if not code then self:showInfo(_("No authorization code was found.")); return end
                 UIManager:close(dialog)
+                account_generation = account_generation + 1
+                local generation = account_generation
                 local config = {
                     client_id = self.settings.client_id,
                     client_secret = self.settings.client_secret,
@@ -736,14 +769,19 @@ function MyAnimeList:finishAuthorization()
                     pkce_verifier = self.settings.pkce_verifier,
                 }
                 self:_runSubprocess(function()
+                    if generation ~= account_generation then return envelope({ error = "account_changed" }) end
                     local token, err = Client.new(config):exchangeCode(code)
                     return envelope({ token = token, error = err })
                 end, _("Connecting to MyAnimeList..."), function(result, err)
+                    if generation ~= account_generation then return end
                     if not result or not result.token then
                         self:showInfo(_("Could not connect to MyAnimeList: ") .. tostring((result and result.error) or err))
                         return
                     end
-                    applyTokenResult(self.settings, result.token)
+                    if not applyTokenResult(self.settings, result.token) then
+                        self:showInfo(_("Could not connect to MyAnimeList: ") .. "invalid_token_response")
+                        return
+                    end
                     self.settings.pkce_verifier = nil
                     self.settings.oauth_state = nil
                     self:saveSettings()
@@ -758,9 +796,11 @@ function MyAnimeList:finishAuthorization()
 end
 
 function MyAnimeList:disconnect()
+    account_generation = account_generation + 1
     self.settings.access_token = nil
     self.settings.refresh_token = nil
     self.settings.access_expires_at = 0
+    self.settings.authorization_required = nil
     self:saveSettings()
     self:notify(_("MyAnimeList disconnected."))
 end
@@ -780,16 +820,12 @@ function MyAnimeList:_searchSeries(series_key, display_name, initial_query)
                 local query = trim(dialog:getInputText())
                 if query == "" then return end
                 UIManager:close(dialog)
-                local config = {
-                    client_id = self.settings.client_id,
-                    access_token = self.settings.access_token,
-                }
-                self:_runSubprocess(function()
-                    local body, err = Client.new(config):searchManga(query)
-                    return envelope({ body = body, error = err })
+                self:_runAccountOperation(function(client)
+                    local body, err = client:searchManga(query)
+                    return { body = body, error = err }
                 end, _("Searching MyAnimeList..."), function(result, err)
                     if not result or not result.body then
-                        self:showInfo(_("MyAnimeList search failed: ") .. tostring((result and result.error) or err))
+                        self:showInfo(_("MyAnimeList search failed: ") .. accountError((result and result.error) or err), 10)
                         return
                     end
                     local results = type(result.body.data) == "table" and result.body.data or {}
@@ -1170,7 +1206,10 @@ function MyAnimeList:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text_func = function()
-                    return self:isAuthorized() and _("Account: connected") or _("Account: not connected")
+                    local state = Client.accountState(self.settings)
+                    if state == "authorization_required" then return _("Account: authorization required") end
+                    if state == "renewal_needed" then return _("Account: token renewal pending") end
+                    return state == "connected" and _("Account: connected") or _("Account: not connected")
                 end,
                 sub_item_table = {
                     { text = _("API client settings"), keep_menu_open = true, callback = function() self:editApiSettings() end },
@@ -1179,7 +1218,9 @@ function MyAnimeList:addToMainMenu(menu_items)
                     end },
                     { text = _("Start authorization"), keep_menu_open = true, callback = function() self:startAuthorization() end },
                     { text = _("Finish authorization"), keep_menu_open = true, callback = function() self:finishAuthorization() end },
-                    { text = _("Disconnect"), enabled_func = function() return self:isAuthorized() end,
+                    { text = _("Disconnect"), enabled_func = function()
+                        return trim(self.settings.access_token) ~= "" or trim(self.settings.refresh_token) ~= ""
+                      end,
                       callback = function() self:disconnect() end },
                 },
             },
